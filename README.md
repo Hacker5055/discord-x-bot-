@@ -110,7 +110,11 @@ curl -fsS "$BX_URL/api/roles/$MEMBER_DISCORD_ID" -H "X-BX-Secret: $BOT_API_SECRE
 
 ## ٥. النشر
 
-### Docker / VPS
+### Heroku عبر GitHub Actions
+
+ده مسار النشر المعتمد للمشروع: **Deploy BLACK X to Heroku** على `main` يبني صورة Docker ويرفعها، والبوت يشتغل على **web dyno واحد من نوع Basic أو Standard** عشان يفضل متصلًا. استخدم تطبيق Heroku **Cedar** على stack `container`. متغيرات البوت الأربعة في **Heroku Config Vars**؛ GitHub يحتاج اسم التطبيق واعتماد نشر Heroku فقط. [دليل الإعداد والنشر خطوة بخطوة](docs/github-actions.md).
+
+### Docker / VPS (بديل يدوي)
 
 ```bash
 docker build -t black-x-bot .
@@ -120,7 +124,7 @@ docker run -d --name black-x-bot --restart unless-stopped \
 
 الصورة `node:20-alpine` وتعمل كمستخدم غير root. الـ healthcheck يستدعي `/health` بالسر من البيئة بدون طباعته. لو خادم الموقع على جهاز آخر، مرّر HTTP عبر شبكة خاصة أو reverse proxy بـ TLS بدل كشف المنفذ للعامة. شغّل نسخة واحدة من البوت.
 
-### Google Cloud Run
+### Google Cloud Run (بديل يدوي)
 
 اضبط الأسرار `discord-bot-token` و`black-x-api-secret` في **Secret Manager** داخل المشروع قبل النشر. اضبط الـ IDs غير السرّية في الأوامر التالية، وشغّلها من جذر المستودع:
 
@@ -147,11 +151,7 @@ gcloud run deploy black-x-bot --source . --project="$PROJECT_ID" --region="$REGI
 
 `--min-instances=1` مع `--no-cpu-throttling` مهمان: اتصال Gateway يحتاج CPU حتى بدون طلبات HTTP. اجعل الحد الأقصى نسخة واحدة لتجنّب ازدواج جلسات Gateway أثناء التشغيل المعتاد، وتجنّب `/setup` أثناء تبديل المراجعات. قد يعيد Cloud Run تشغيل النسخة؛ الحد الأدنى ليس ضمانًا لاتصال بلا انقطاع. اترك فحص بدء Cloud Run الافتراضي **TCP**؛ لا تكشف `/health` بدون سر. امنح هوية خادم الموقع `roles/run.invoker` على الخدمة وأرسل Cloud Run identity token عبر `Authorization: Bearer …` **بالإضافة إلى** `X-BX-Secret`. على أول نشر من المصدر قد يحتاج حساب Cloud Build لصلاحية `roles/run.builder` حسب إعداد المشروع.
 
-### GitHub Actions → Cloud Run
-
-الـ CI يختبر الكود بدون أسرار. للنشر الفعلي من GitHub استخدم الـ workflow اليدوي **Deploy BLACK X to Cloud Run** بعد دمجه في `main`. [دليل إعداد الـ Action](docs/github-actions.md) يوضح متغيرات GitHub وهوية OIDC والأسرار في Secret Manager. لا تستخدم runner الـ CI لاستضافة البوت.
-
-### Fly.io
+### Fly.io (بديل يدوي)
 
 استخدم نفس `Dockerfile` مع `fly launch --no-deploy`، واضبط `DISCORD_GUILD_ID` و`BX_OWNER_DISCORD_ID` في `[env]`، والمتغيرين السريين من Fly Secrets. في `fly.toml` ثبّت الإعدادات التالية:
 
@@ -175,7 +175,7 @@ gcloud run deploy black-x-bot --source . --project="$PROJECT_ID" --region="$REGI
 | `Used disallowed intents` | شغّل هذه النسخة من البوت؛ تستخدم `Guilds` فقط. لا تضف `GuildMembers` أو `MessageContent` أو أي intent إضافي بدون حاجة وموافقة. |
 | `Rate limited` | احترم `Retry-After` للـ HTTP، وتجنّب تشغيل `/setup` مرارًا. عميل Discord ينتظر `retry_after` تلقائيًا. |
 | الأوامر لا تظهر | استخدم رابط التثبيت بنطاق `applications.commands`، ثم شغّل `npm run register`، وتأكد من `DISCORD_GUILD_ID` والأذونات الافتراضية للأمر. |
-| البوت يظهر Offline | راجع سجل JSON و`/health` بالسر. على Cloud Run تحقق من `min-instances=1` و`--no-cpu-throttling`، وعلى Fly أوقف الإيقاف التلقائي. |
+| البوت يظهر Offline | راجع سجل JSON و`/health` بالسر. على Heroku تحقق أن `web` واحد شغّال على Basic أو Standard. على Cloud Run تحقق من `min-instances=1` و`--no-cpu-throttling`، وعلى Fly أوقف الإيقاف التلقائي. |
 | رول البوت منخفض | افتح **Server Settings → Roles** وارفع أعلى رول للبوت فوق كل رولات BLACK X، ثم أعد `/setup`. البوت لا يرفع روله بنفسه. |
 | الويب هوك القديم لا يعمل | بعد تدوير الويب هوك، انسخ رابط النسخة الحالية من Integrations وحدّث سر التطبيق المرسل. ثبّت ID في `DISCORD_WEBHOOK_*` إن أردت الاحتفاظ بالرابط بين تشغيلات `/setup`. |
 
@@ -191,4 +191,4 @@ npm test
 - `src/index.js` و`src/bot.js` و`src/commands/`: الإقلاع والـ Gateway وأوامر السلاش.
 - `src/provisioning.js` و`src/discord/`: مطابقة الموارد، الإعداد، الهرمية، وDiscord REST v10.
 - `src/http/` و`src/roles/sync.js`: HTTP ومزامنة الرولات وفحص الصحة.
-- `.env.example` و`Dockerfile` و`.github/workflows/ci.yml`: الإعداد والنشر والتحقق.
+- `.env.example` و`Dockerfile` و`.github/workflows/`: الإعداد وصورة النشر على Heroku وCI.
