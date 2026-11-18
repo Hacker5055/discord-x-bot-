@@ -1,0 +1,10 @@
+.git
+.github
+node_modules
+.env
+.env.*
+secrets
+coverage
+*.log
+tests
+gha-creds-*.json

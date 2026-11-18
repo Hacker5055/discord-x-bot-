@@ -1,0 +1,88 @@
+name: Deploy BLACK X to Heroku
+
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: black-x-heroku-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: black-x-production
+    env:
+      HEROKU_APP_NAME: ${{ vars.HEROKU_APP_NAME }}
+    steps:
+      - name: Validate Heroku app name
+        shell: bash
+        run: |
+          if ! [[ "$HEROKU_APP_NAME" =~ ^[a-z][a-z0-9-]{1,28}[a-z0-9]$ ]]; then
+            echo '::error::Set a valid HEROKU_APP_NAME (app name, not URL) in the black-x-production environment.'
+            exit 1
+          fi
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Build the web image (Linux AMD64)
+        shell: bash
+        run: |
+          docker buildx build --platform linux/amd64 --load --provenance=false --sbom=false \
+            --tag "registry.heroku.com/$HEROKU_APP_NAME/web" .
+      - name: Push and release to Heroku
+        shell: bash
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$HEROKU_API_KEY" || "$HEROKU_API_KEY" == *[$'\r\n']* ]]; then
+            echo '::error::Set the HEROKU_API_KEY secret for the deploy account in black-x-production.'
+            exit 1
+          fi
+
+          heroku_api() {
+            printf 'Authorization: Bearer %s\n' "$HEROKU_API_KEY" | \
+              curl --disable --fail --silent --show-error --proto '=https' --max-time 90 --header @- "$@"
+          }
+
+          if ! heroku_api --header 'Accept: application/vnd.heroku+json; version=3' \
+            "https://api.heroku.com/apps/$HEROKU_APP_NAME" | \
+            jq -e '.stack.name == "container" or .build_stack.name == "container"' >/dev/null; then
+            echo '::error::Could not verify the app. Check the deploy account access, app name, and container stack (Cedar).'
+            exit 1
+          fi
+
+          export DOCKER_CONFIG="$(mktemp -d "${RUNNER_TEMP}/black-x-docker.XXXXXX")"
+          trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
+          printf '%s\n' "$HEROKU_API_KEY" | docker login --username=_ --password-stdin registry.heroku.com
+          image="registry.heroku.com/$HEROKU_APP_NAME/web"
+          docker push "$image"
+
+          # The formation endpoint expects the image configuration ID, not the manifest digest.
+          image_id=$(docker image inspect --format '{{.Id}}' "$image")
+          if ! [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo '::error::Unable to resolve the pushed Docker image ID.'
+            exit 1
+          fi
+          payload=$(jq -cn --arg image "$image_id" '{updates: [{type: "web", docker_image: $image}]}')
+          if ! status=$(heroku_api --request PATCH \
+            --header 'Accept: application/vnd.heroku+json; version=3.docker-releases' \
+            --header 'Content-Type: application/json' --data-binary "$payload" \
+            --output /dev/null --write-out '%{http_code}' \
+            "https://api.heroku.com/apps/$HEROKU_APP_NAME/formation"); then
+            echo '::error::Heroku rejected the web release. Check the app Activity and deploy account.'
+            exit 1
+          fi
+          if ! [[ "$status" =~ ^2[0-9]{2}$ ]]; then
+            echo '::error::Heroku did not accept the release.'
+            exit 1
+          fi
+          echo 'Heroku accepted the web release. Check Heroku dyno logs for gateway_ready.'
