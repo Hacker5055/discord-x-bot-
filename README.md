@@ -58,7 +58,7 @@ node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("h
 
 ### ميزات المجتمع والركن الإسلامي
 
-`/arena` تحديات الأنمي، `/party` حفلات مشاهدة، `/follow` تنبيهات الحلقات، `/recommend` ترشيحات BLACK Z من الكتالوج، و`/adhkar`، `/prayer`، `/daily`، `/ramadan`، `/seerah`. راجع [الأوامر والتخزين وعقد تكامل الكتالوج والحلقات](docs/community.md). الجدولة والمتابعات وترتيب الأسبوع تحتاج PostgreSQL؛ الميزات الأصلية تفضل متاحة من غيره.
+`/arena` تحديات الأنمي، `/party` حفلات مشاهدة، `/follow` تنبيهات الحلقات، `/recommend` ترشيحات BLACK Z من الكتالوج، و`/adhkar`، `/prayer`، `/daily`، `/ramadan`، `/seerah`. راجع [الأوامر والتخزين وعقد تكامل الكتالوج والحلقات](docs/community.md). الجدولة والمتابعات وترتيب الأسبوع تحتاج Turso Cloud (`TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN`) أو PostgreSQL (`DATABASE_URL`). اضبط القيم في Config Vars لتطبيق البوت على Heroku فقط. الميزات الأصلية تفضل متاحة من غير قاعدة بيانات.
 
 ### ما ينشئه `/setup`
 
@@ -195,4 +195,5 @@ npm test
 - `src/index.js` و`src/bot.js` و`src/commands/`: الإقلاع والـ Gateway وأوامر السلاش.
 - `src/provisioning.js` و`src/discord/`: مطابقة الموارد، الإعداد، الهرمية، وDiscord REST v10.
 - `src/http/` و`src/roles/sync.js`: HTTP ومزامنة الرولات وفحص الصحة.
+- `src/community/`: ميزات المجتمع، عامل التذكيرات، وتخزين دائم اختياري لكل سيرفر.
 - `.env.example` و`Dockerfile` و`.github/workflows/`: الإعداد وصورة النشر على Heroku وCI.
