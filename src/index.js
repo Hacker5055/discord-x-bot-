@@ -8,7 +8,8 @@ import { createRoleService } from './roles/sync.js';
 import { createAnimeService } from './community/anime.js';
 import { createScheduler } from './community/jobs.js';
 import { createQuizService } from './community/quiz.js';
-import { createPostgresStore } from './community/store.js';
+import { createCommunityStore } from './community/backend.js';
+import { configuredSecrets } from './lib/redact.js';
 
 await runCli(async (dependencies) => {
   const { api, config, log } = dependencies;
@@ -16,10 +17,9 @@ await runCli(async (dependencies) => {
   const context = { ...dependencies, botId: botUser.id };
   const roles = createRoleService(context);
   const runSetup = createProvisioner(context);
-  const store = config.databaseUrl ? createPostgresStore({ connectionString: config.databaseUrl,
-    ca: config.databaseCa, guildId: config.guildId, log }) : undefined;
+  const store = createCommunityStore({ config, log });
   const now = Date.now;
-  const anime = createAnimeService({ store, secrets: [config.botToken, config.apiSecret, config.databaseUrl], now });
+  const anime = createAnimeService({ store, secrets: configuredSecrets(config), now });
   const quiz = createQuizService({ api, store, log, now });
   const client = createBot({ ...context, roles, runSetup, community: { anime, quiz, store, now } });
   const getHealth = () => botHealth(client, botUser, config.guildId);

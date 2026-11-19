@@ -57,4 +57,4 @@ heroku logs --tail --app "$APP_NAME"
 | لا يظهر زر **Run workflow** | تأكد أن `.github/workflows/deploy-heroku.yml` وصل إلى `main`. |
 | الإصدار اتقبل والبوت Offline أو ظهر `H10` / `R10` | افحص `heroku logs`، قم بتشغيل `web` واحد، راجع Config Vars، واترك `PORT` لـ Heroku. |
 
-لتفعيل حفلات المشاهدة والتنبيهات والكتالوج وترتيب الأسبوع، راجع [إعداد ميزات المجتمع](community.md#التفعيل-على-heroku) على تطبيق **البوت**. لا تضع `DATABASE_URL` أو `BX_DATABASE_CA` في GitHub Actions.
+لتفعيل حفلات المشاهدة والتنبيهات والكتالوج وترتيب الأسبوع، راجع [إعداد ميزات المجتمع](community.md#التفعيل-على-heroku) على تطبيق **البوت**. متغيرات Turso (`TURSO_DATABASE_URL` و`TURSO_AUTH_TOKEN`) أو PostgreSQL (`DATABASE_URL` و`BX_DATABASE_CA`) في **Heroku Config Vars**، مش في GitHub Actions أو Google AI Studio.

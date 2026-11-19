@@ -1,5 +1,9 @@
 const WEBHOOK_CREDENTIAL = /https?:\/\/(?:[a-z]+\.)?(?:discord\.com|discordapp\.com)\/api\/(?:v\d+\/)?webhooks\/\d+\/[a-z0-9_.-]+/giu;
 
+export function configuredSecrets(config) {
+  return [config.botToken, config.apiSecret, config.databaseUrl, config.databaseCa, config.tursoUrl, config.tursoAuthToken];
+}
+
 export function createRedactor(secrets = []) {
   const values = [...new Set(secrets.filter((value) => typeof value === 'string' && value))]
     .sort((a, b) => b.length - a.length);

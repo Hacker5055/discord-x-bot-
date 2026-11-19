@@ -4,7 +4,7 @@ import { AppError, ownerRequired } from '../lib/errors.js';
 import { PERMISSION, channelPermissions, guildPermissions, hasPermission, isTimedOut } from '../discord/permissions.js';
 import { readGuildState, resolveRooms } from '../discord/state.js';
 import { actingAsOwner } from './access.js';
-import { createRedactor } from '../lib/redact.js';
+import { configuredSecrets, createRedactor } from '../lib/redact.js';
 
 export function announcementPayload({ room, title, body, url, nonce, secrets }) {
   if (!Object.hasOwn(ROOMS, room) || !title?.trim() || !body?.trim()) {
@@ -40,7 +40,7 @@ export const announceCommand = {
     const key = interaction.options.getString('room', true);
     const payload = announcementPayload({
       room: key, title: interaction.options.getString('title', true), body: interaction.options.getString('body', true),
-      url: interaction.options.getString('url'), nonce: interaction.id, secrets: [config.botToken, config.apiSecret, config.databaseUrl],
+      url: interaction.options.getString('url'), nonce: interaction.id, secrets: configuredSecrets(config),
     });
     const { guildId } = config;
     const [state, actor] = await Promise.all([

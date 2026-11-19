@@ -1,6 +1,6 @@
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { AppError } from '../lib/errors.js';
-import { createRedactor } from '../lib/redact.js';
+import { configuredSecrets, createRedactor } from '../lib/redact.js';
 import { cleanText, siteUrl } from '../community/anime.js';
 import { adhkarPage, prayerCard, ramadanCard, ramadanReminder, setDaily } from '../community/islamic.js';
 import { dailyEmbed } from '../community/jobs.js';
@@ -62,7 +62,7 @@ export const partyCommand = {
       return ['اتلغت الحفلة والتذكيرات. لو الكارت منشور، هيتحدّث قريب.'];
     }
     requirePostChannel(interaction.channel, config.guildId, interaction.appPermissions);
-    const redact = createRedactor([config.apiSecret, config.botToken, config.databaseUrl]);
+    const redact = createRedactor(configuredSecrets(config));
     const title = cleanText(interaction.options.getString('title', true), 90, redact,
       () => new AppError('INVALID_PARTY_TITLE', 'اكتب عنوانًا صالحًا من غير أي أسرار أو روابط Webhook.'));
     const url = siteUrl(cleanText(interaction.options.getString('url', true), 600, redact));

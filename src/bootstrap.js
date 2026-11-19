@@ -3,6 +3,7 @@ import { DiscordApi } from './discord/api.js';
 import { loadConfig } from './lib/env.js';
 import { AppError, describeError, errorFields } from './lib/errors.js';
 import { createLogger } from './lib/log.js';
+import { configuredSecrets } from './lib/redact.js';
 
 export async function registerCommands({ api, config, log }) {
   const bot = await api.getCurrentUser();
@@ -20,7 +21,7 @@ export async function runCli(run) {
   let log = createLogger();
   try {
     const config = loadConfig();
-    log = createLogger({ secrets: [config.botToken, config.apiSecret, config.databaseUrl, config.databaseCa] });
+    log = createLogger({ secrets: configuredSecrets(config) });
     await run({ api: new DiscordApi({ token: config.botToken }), config, log });
   } catch (error) {
     log.error('startup_failed', { ...errorFields(error), message: describeError(error) });

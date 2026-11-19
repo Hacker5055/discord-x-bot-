@@ -2,11 +2,11 @@ import pg from 'pg';
 import { AppError } from '../lib/errors.js';
 
 export const newState = () => ({ catalog: {}, follows: {}, episodes: {}, parties: {}, jobs: {}, daily: null, lastDaily: null, scores: {} });
-const restore = (data) => ({ ...newState(), ...data });
-const unavailable = () => new AppError('COMMUNITY_STORAGE_UNAVAILABLE', 'التخزين الدائم غير متاح الآن. جرّب لاحقًا.', 503);
+export const restoreState = (data) => ({ ...newState(), ...data });
+export const storageUnavailable = () => new AppError('COMMUNITY_STORAGE_UNAVAILABLE', 'التخزين الدائم غير متاح الآن. جرّب لاحقًا.', 503);
 
 export function requireStore(store) {
-  if (!store) throw new AppError('COMMUNITY_STORAGE_REQUIRED', 'الميزة تحتاج تخزينًا دائمًا. اطلب من الإدارة ضبط DATABASE_URL للبوت.', 503);
+  if (!store) throw new AppError('COMMUNITY_STORAGE_REQUIRED', 'الميزة تحتاج تخزينًا دائمًا. اطلب من الإدارة ضبط TURSO_DATABASE_URL وTURSO_AUTH_TOKEN، أو DATABASE_URL لـPostgreSQL.', 503);
   return store;
 }
 
@@ -66,8 +66,8 @@ export function createPostgresStore({ connectionString, ca, guildId, log, pool =
       try {
         await initialize();
         const { rows } = await pool.query(sql, [guildId]);
-        return restore(rows[0].data);
-      } catch { throw unavailable(); }
+        return restoreState(rows[0].data);
+      } catch { throw storageUnavailable(); }
     },
     async update(mutator) {
       let client;
@@ -76,7 +76,7 @@ export function createPostgresStore({ connectionString, ca, guildId, log, pool =
         client = await pool.connect();
         await client.query('BEGIN');
         const { rows } = await client.query(`${sql} FOR UPDATE`, [guildId]);
-        const state = restore(rows[0].data);
+        const state = restoreState(rows[0].data);
         const before = JSON.stringify(state);
         const result = mutator(state);
         const after = JSON.stringify(state);
@@ -86,7 +86,7 @@ export function createPostgresStore({ connectionString, ca, guildId, log, pool =
       } catch (error) {
         if (client) await client.query('ROLLBACK').catch(() => {});
         if (error instanceof AppError) throw error;
-        throw unavailable();
+        throw storageUnavailable();
       } finally {
         client?.release();
       }
