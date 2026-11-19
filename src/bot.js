@@ -1,9 +1,10 @@
 import { Client, Events, GatewayIntentBits, MessageFlags, Status } from 'discord.js';
 import { commands } from './commands/index.js';
+import { communityButton } from './commands/community.js';
+import { NO_MENTIONS } from './community/ui.js';
 import { truncate } from './lib/catalog.js';
 import { AppError, describeError, errorFields } from './lib/errors.js';
 
-const NO_MENTIONS = { parse: [], repliedUser: false };
 const EPHEMERAL = MessageFlags.Ephemeral;
 const replyBody = (content) => ({ content, allowedMentions: NO_MENTIONS });
 
@@ -25,22 +26,45 @@ function chunks(lines) {
 export function createInteractionHandler(dependencies) {
   const { config, log } = dependencies;
   return async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
+    const chat = interaction.isChatInputCommand?.();
+    const button = interaction.isButton?.() && interaction.customId?.startsWith('bx:');
+    const autocomplete = interaction.isAutocomplete?.();
+    if (!chat && !button && !autocomplete) return;
     const command = commands.get(interaction.commandName);
+    if (autocomplete) {
+      let choices = [];
+      try {
+        if (interaction.guildId === config.guildId && command?.autocomplete) choices = await command.autocomplete(interaction, dependencies);
+        await interaction.respond(choices);
+      } catch (error) {
+        log.warn('autocomplete_failed', { command: command?.data.name ?? 'unknown', ...errorFields(error) });
+        if (!interaction.responded) await interaction.respond([]).catch(() => {});
+      }
+      return;
+    }
+    let updating = false;
     try {
       if (interaction.guildId !== config.guildId) {
         throw new AppError('GUILD_NOT_ALLOWED', 'البوت مخصص لسيرفر BLACK X الرسمي فقط.', 403);
       }
-      if (!command) throw new AppError('UNKNOWN_COMMAND', 'الأمر غير معروف. أعد تسجيل أوامر السيرفر.');
-      await interaction.deferReply({ flags: EPHEMERAL });
-      const [first, ...rest] = chunks(await command.run(interaction, dependencies));
-      await interaction.editReply(replyBody(first));
-      for (const part of rest) await interaction.followUp({ ...replyBody(part), flags: EPHEMERAL });
+      if (chat && !command) throw new AppError('UNKNOWN_COMMAND', 'الأمر غير معروف. أعد تسجيل أوامر السيرفر.');
+      if (button && interaction.customId.startsWith('bx:a:')) {
+        await interaction.deferUpdate();
+        updating = true;
+      } else await interaction.deferReply({ flags: EPHEMERAL });
+      const result = button ? await communityButton(interaction, dependencies) : await command.run(interaction, dependencies);
+      if (!Array.isArray(result)) {
+        await interaction.editReply({ ...result, allowedMentions: NO_MENTIONS });
+      } else {
+        const [first, ...rest] = chunks(result);
+        await interaction.editReply(replyBody(first));
+        for (const part of rest) await interaction.followUp({ ...replyBody(part), flags: EPHEMERAL });
+      }
     } catch (error) {
-      log.warn('command_failed', { command: command?.data.name ?? 'unknown', ...errorFields(error) });
+      log.warn('command_failed', { command: command?.data.name ?? (button ? 'button' : 'unknown'), ...errorFields(error) });
       const response = replyBody(describeError(error));
       try {
-        if (interaction.replied) await interaction.followUp({ ...response, flags: EPHEMERAL });
+        if (interaction.replied || updating) await interaction.followUp({ ...response, flags: EPHEMERAL });
         else if (interaction.deferred) await interaction.editReply(response);
         else await interaction.reply({ ...response, flags: EPHEMERAL });
       } catch {

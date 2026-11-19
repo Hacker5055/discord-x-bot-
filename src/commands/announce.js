@@ -40,7 +40,7 @@ export const announceCommand = {
     const key = interaction.options.getString('room', true);
     const payload = announcementPayload({
       room: key, title: interaction.options.getString('title', true), body: interaction.options.getString('body', true),
-      url: interaction.options.getString('url'), nonce: interaction.id, secrets: [config.botToken, config.apiSecret],
+      url: interaction.options.getString('url'), nonce: interaction.id, secrets: [config.botToken, config.apiSecret, config.databaseUrl],
     });
     const { guildId } = config;
     const [state, actor] = await Promise.all([

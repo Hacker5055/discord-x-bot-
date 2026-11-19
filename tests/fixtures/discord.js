@@ -32,6 +32,8 @@ export class MemoryDiscord {
   channels = [];
   hooks = [];
   messages = [];
+  edits = [];
+  dms = new Map();
   members = new Map([[BOT_ID, { roles: [BOT_ROLE_ID] }], [OWNER_ID, { roles: [] }],
     [MEMBER_ID, { roles: [] }], [MOD_ID, { roles: [] }]]);
 
@@ -135,7 +137,22 @@ export class MemoryDiscord {
 
   async createMessage(channelId, data) {
     this.add('createMessage', 'POST', { channelId });
-    this.messages.push(this.copy({ channelId, data }));
+    const message = { channelId, data, id: this.nextId() };
+    this.messages.push(this.copy(message));
+    return this.copy(message);
+  }
+
+  async editMessage(channelId, messageId, data) {
+    this.add('editMessage', 'PATCH', { channelId, messageId });
+    assert.ok(this.messages.some(({ id, channelId: channel }) => channel === channelId && id === messageId));
+    this.edits.push(this.copy({ channelId, messageId, data }));
+    return { id: messageId };
+  }
+
+  async createDm(userId) {
+    this.add('createDm', 'POST', { userId });
+    if (!this.dms.has(userId)) this.dms.set(userId, this.nextId());
+    return { id: this.dms.get(userId) };
   }
 
   async registerGuildCommands(applicationId, guildId, commands) {

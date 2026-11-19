@@ -20,7 +20,7 @@ export async function runCli(run) {
   let log = createLogger();
   try {
     const config = loadConfig();
-    log = createLogger({ secrets: [config.botToken, config.apiSecret] });
+    log = createLogger({ secrets: [config.botToken, config.apiSecret, config.databaseUrl, config.databaseCa] });
     await run({ api: new DiscordApi({ token: config.botToken }), config, log });
   } catch (error) {
     log.error('startup_failed', { ...errorFields(error), message: describeError(error) });

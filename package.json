@@ -2,7 +2,7 @@
   "name": "black-x-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "Discord bot and internal role-sync API for BLACK X",
+  "description": "Official BLACK X Discord bot, community features and server-side integrations",
   "type": "module",
   "engines": {
     "node": ">=20.12.0"
@@ -13,6 +13,8 @@
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {
-    "discord.js": "^14.28.1"
+    "adhan": "^4.4.6",
+    "discord.js": "^14.28.1",
+    "pg": "^8.23.1"
   }
 }
