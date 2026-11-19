@@ -56,6 +56,10 @@ node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("h
 
 كل ردود الأوامر **ephemeral** وبالعربي. الإعلان نفسه يُنشر في الروم المختار.
 
+### ميزات المجتمع والركن الإسلامي
+
+`/arena` تحديات الأنمي، `/party` حفلات مشاهدة، `/follow` تنبيهات الحلقات، `/recommend` ترشيحات BLACK Z من الكتالوج، و`/adhkar`، `/prayer`، `/daily`، `/ramadan`، `/seerah`. راجع [الأوامر والتخزين وعقد تكامل الكتالوج والحلقات](docs/community.md). الجدولة والمتابعات وترتيب الأسبوع تحتاج PostgreSQL؛ الميزات الأصلية تفضل متاحة من غيره.
+
 ### ما ينشئه `/setup`
 
 ضمن كاتيجوري `🎮 BLACK X`:
@@ -112,7 +116,7 @@ curl -fsS "$BX_URL/api/roles/$MEMBER_DISCORD_ID" -H "X-BX-Secret: $BOT_API_SECRE
 
 ### Heroku عبر GitHub Actions
 
-ده مسار النشر المعتمد للمشروع: **Deploy BLACK X to Heroku** على `main` يبني صورة Docker ويرفعها، والبوت يشتغل على **web dyno واحد من نوع Basic أو Standard** عشان يفضل متصلًا. استخدم تطبيق Heroku **Cedar** على stack `container`. متغيرات البوت الأربعة في **Heroku Config Vars**؛ GitHub يحتاج اسم التطبيق واعتماد نشر Heroku فقط. [دليل الإعداد والنشر خطوة بخطوة](docs/github-actions.md).
+ده مسار النشر المعتمد للمشروع: **Deploy BLACK X to Heroku** على `main` يبني صورة Docker ويرفعها، والبوت يشتغل على **web dyno واحد من نوع Basic أو Standard** عشان يفضل متصلًا. استخدم تطبيق Heroku **Cedar** على stack `container`. متغيرات البوت الأساسية (وقاعدة البيانات الاختيارية) في **Heroku Config Vars**؛ GitHub يحتاج اسم التطبيق واعتماد نشر Heroku فقط. [دليل الإعداد والنشر خطوة بخطوة](docs/github-actions.md).
 
 ### Docker / VPS (بديل يدوي)
 

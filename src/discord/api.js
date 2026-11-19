@@ -113,6 +113,8 @@ export class DiscordApi {
     }
   }
   createMessage(channelId, data) { return this.#request('POST', `/channels/${channelId}/messages`, data); }
+  editMessage(channelId, messageId, data) { return this.#request('PATCH', `/channels/${channelId}/messages/${messageId}`, data); }
+  createDm(recipientId) { return this.#request('POST', '/users/@me/channels', { recipient_id: recipientId }); }
   registerGuildCommands(applicationId, guildId, commands) {
     return this.#request('PUT', `/applications/${applicationId}/guilds/${guildId}/commands`, commands);
   }

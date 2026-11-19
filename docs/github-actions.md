@@ -56,3 +56,5 @@ heroku logs --tail --app "$APP_NAME"
 | فشل التحقق من تطبيق Heroku قبل الرفع | `HEROKU_APP_NAME`، وسر `HEROKU_API_KEY`، وصلاحية الحساب على التطبيق، و`container` stack على Cedar. |
 | لا يظهر زر **Run workflow** | تأكد أن `.github/workflows/deploy-heroku.yml` وصل إلى `main`. |
 | الإصدار اتقبل والبوت Offline أو ظهر `H10` / `R10` | افحص `heroku logs`، قم بتشغيل `web` واحد، راجع Config Vars، واترك `PORT` لـ Heroku. |
+
+لتفعيل حفلات المشاهدة والتنبيهات والكتالوج وترتيب الأسبوع، راجع [إعداد ميزات المجتمع](community.md#التفعيل-على-heroku) على تطبيق **البوت**. لا تضع `DATABASE_URL` أو `BX_DATABASE_CA` في GitHub Actions.

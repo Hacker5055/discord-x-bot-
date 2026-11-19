@@ -5,25 +5,36 @@ import { botHealth, createBot, loginBot } from './bot.js';
 import { createHttpServer } from './http/server.js';
 import { createProvisioner } from './provisioning.js';
 import { createRoleService } from './roles/sync.js';
+import { createAnimeService } from './community/anime.js';
+import { createScheduler } from './community/jobs.js';
+import { createQuizService } from './community/quiz.js';
+import { createPostgresStore } from './community/store.js';
 
 await runCli(async (dependencies) => {
-  const { config, log } = dependencies;
+  const { api, config, log } = dependencies;
   const botUser = await registerCommands(dependencies);
   const context = { ...dependencies, botId: botUser.id };
   const roles = createRoleService(context);
   const runSetup = createProvisioner(context);
-  const client = createBot({ ...context, roles, runSetup });
-  const server = createHttpServer({ apiSecret: config.apiSecret, roles, log,
-    getHealth: () => botHealth(client, botUser, config.guildId) });
+  const store = config.databaseUrl ? createPostgresStore({ connectionString: config.databaseUrl,
+    ca: config.databaseCa, guildId: config.guildId, log }) : undefined;
+  const now = Date.now;
+  const anime = createAnimeService({ store, secrets: [config.botToken, config.apiSecret, config.databaseUrl], now });
+  const quiz = createQuizService({ api, store, log, now });
+  const client = createBot({ ...context, roles, runSetup, community: { anime, quiz, store, now } });
+  const getHealth = () => botHealth(client, botUser, config.guildId);
+  const worker = createScheduler({ api, store, guildId: config.guildId, log, now, ready: () => getHealth().ok });
+  const server = createHttpServer({ apiSecret: config.apiSecret, roles, anime, log, getHealth });
   let stopping;
 
   function shutdown() {
     if (!stopping) {
       const deadline = setTimeout(() => process.exit(process.exitCode ?? 0), 8000);
       deadline.unref();
+      quiz.close();
       stopping = Promise.allSettled([
-        new Promise((resolve) => server.close(resolve)), client.destroy(),
-      ]).then(() => clearTimeout(deadline));
+        new Promise((resolve) => server.close(resolve)), client.destroy(), worker.stop(),
+      ]).then(() => store?.close()).catch(() => log.warn('community_storage_close_failed')).finally(() => clearTimeout(deadline));
     }
     return stopping;
   }
@@ -44,6 +55,7 @@ await runCli(async (dependencies) => {
     client.once(Events.Invalidated, gatewayEnded);
     log.info('http_listening', { port: config.port });
     await loginBot(client, config.botToken);
+    worker.start();
   } catch (error) {
     await shutdown();
     throw error;
