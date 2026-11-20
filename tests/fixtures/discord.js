@@ -70,6 +70,14 @@ export class MemoryDiscord {
     return this.copy(this.members.get(userId));
   }
 
+  async listGuildMembers(guildId, { limit = 1000, after } = {}) {
+    this.check(guildId);
+    this.add('listGuildMembers', 'GET', { limit, after });
+    return [...this.members.entries()].sort(([a], [b]) => BigInt(a) < BigInt(b) ? -1 : 1)
+      .filter(([id]) => !after || BigInt(id) > BigInt(after)).slice(0, limit)
+      .map(([id, member]) => this.copy({ user: { id, bot: id === BOT_ID }, ...member }));
+  }
+
   async getRoles(guildId) { this.check(guildId); this.add('getRoles', 'GET'); return this.copy(this.roles); }
   async createRole(guildId, data) {
     this.check(guildId);
@@ -135,6 +143,13 @@ export class MemoryDiscord {
   async updateChannel(channelId, data, options) {
     this.add('updateChannel', 'PATCH', { channelId, data });
     const channel = this.channel(channelId);
+    if (channel.type === ChannelType.GuildCategory && Object.hasOwn(data, 'permission_overwrites')) {
+      const canonical = (rows) => JSON.stringify(rows.map((entry) => [entry.id, entry.type, entry.allow, entry.deny]).sort());
+      const before = canonical(channel.permission_overwrites);
+      for (const child of this.channels.filter((ch) => ch.parent_id === channelId && canonical(ch.permission_overwrites) === before)) {
+        child.permission_overwrites = this.copy(data.permission_overwrites);
+      }
+    }
     if (Object.hasOwn(data, 'rate_limit_per_user')) this.offsetSlowMode(channelId, data.rate_limit_per_user, BOT_ID, options?.reason);
     return this.copy(Object.assign(channel, data));
   }
@@ -242,7 +257,7 @@ export class MemoryDiscord {
   async createDm(userId) {
     this.add('createDm', 'POST', { userId });
     if (!this.dms.has(userId)) this.dms.set(userId, this.nextId());
-    return { id: this.dms.get(userId) };
+    return { id: this.dms.get(userId), type: ChannelType.DM, recipients: [{ id: userId }] };
   }
 
   async registerGuildCommands(applicationId, guildId, commands) {

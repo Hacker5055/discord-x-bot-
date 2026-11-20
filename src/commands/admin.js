@@ -1,6 +1,7 @@
 import { ChannelType as C, PermissionFlagsBits as P, SlashCommandBuilder } from 'discord.js';
 import { adminUnavailable } from '../admin/index.js';
 import { adminOf, INTERESTS, MODULES, ROOM_TYPES, TEAMS, TEXT_ROOMS } from '../admin/core.js';
+import { PROFILES, SETUP_TYPES } from '../admin/channel-plan.js';
 import { SOCIAL_PLATFORMS } from '../admin/welcome.js';
 import { AppError } from '../lib/errors.js';
 
@@ -76,6 +77,7 @@ export const adminCommands = [
       bool('share', 'شارك الرد أيضًا في الموقع لصاحب التذكرة والدعم')),
     r('share', 'صاحب التذكرة: ابعت رسالة مشتركة من داخل روم تذكرتك', id(), text('body', 'الرسالة المشتركة مع الموقع', 1000)),
     r('close', 'اقفل التذكرة للكتابة من غير حذف', id(), reason()),
+    r('alerts', 'للمالك: حالة توصيل تنبيهات الشكوى', id()),
   ]),
   command('staff', 'متابعة الطلبات والمهام والسجل داخل الفريق', 'staff', [
     r('inbox', 'اعرض الطلبات المفتوحة', team()), r('detail', 'اعرض تفاصيل طلب حسب صلاحيات الفريق', team(), id()),
@@ -153,4 +155,17 @@ export const adminCommands = [
     r('list', 'اعرض الإعلانات المجدولة وحالتها'), r('cancel', 'ألغِ إعلانًا لم يُرسل بعد', id()),
   ]),
   command('automod', 'ملخص أعداد تنفيذ قواعد AutoMod لنطاق المشرف', 'auto', [r('summary', 'ملخص الرصد')], { single: true }),
+  command('server', 'تجهيز أذونات الرومات ولوحات BLACK X بمعاينة خاصة', 'server', [
+    r('bind', 'حدد غرض روم أو كاتيجوري بدون تعديل الأذونات', channel('channel', 'الروم أو الكاتيجوري', SETUP_TYPES),
+      choice('profile', 'غرض الروم أو الكاتيجوري', PROFILES), role(false)),
+    r('unbind', 'شيل ربط الروم من خطط التجهيز؛ ما تمسحش الروم', channel('channel', 'الروم أو الكاتيجوري', SETUP_TYPES, false),
+      text('channel_id', 'معرّف روم اتحذف لو مش موجود في القائمة', 20, false)),
+    r('prepare', 'عاين خطة التجهيز ووافق بزر خاص لتطبيقها', channel('panel', 'روم لوحة فتح الشكاوى للأعضاء', TEXT_ROOMS, false),
+      channel('category', 'كاتيجوري التذاكر الخاصة', [C.GuildCategory], false), channel('staff', 'روم مراجعة الشكاوى الخاص', TEXT_ROOMS, false), role(false)),
+    r('undo', 'عاين استرجاع الأذونات لآخر تطبيق بدون الكتابة فوق تعديل أحدث'),
+  ], { owner: true }),
+  command('rules', 'احفظ مسودة قوانين BLACK X وعاينها وحدّث الرسالة المنشورة', 'rules', [
+    r('edit', 'احفظ نص القوانين كمسودة بدون نشر', text('text', 'نص القوانين؛ ينفع تنسخ أكثر من سطر', 3000)),
+    r('preview', 'عاين النص الحالي بشكل خاص'), r('publish', 'انشر أو عدّل رسالة القوانين في الروم المربوط'),
+  ], { owner: true }),
 ];

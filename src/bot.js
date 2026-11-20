@@ -29,8 +29,9 @@ export function createInteractionHandler(dependencies) {
   return async (interaction) => {
     const chat = interaction.isChatInputCommand?.();
     const button = interaction.isButton?.() && interaction.customId?.startsWith('bx:');
+    const modal = interaction.isModalSubmit?.() && /^bx:x:complaint:[0-9]{17,20}$/.test(interaction.customId);
     const autocomplete = interaction.isAutocomplete?.();
-    if (!chat && !button && !autocomplete) return;
+    if (!chat && !button && !modal && !autocomplete) return;
     const command = commands.get(interaction.commandName);
     if (autocomplete) {
       let choices = [];
@@ -49,14 +50,19 @@ export function createInteractionHandler(dependencies) {
         throw new AppError('GUILD_NOT_ALLOWED', 'البوت مخصص لسيرفر BLACK X الرسمي فقط.', 403);
       }
       if (chat && !command) throw new AppError('UNKNOWN_COMMAND', 'الأمر غير معروف. أعد تسجيل أوامر السيرفر.');
+      if (button && interaction.customId === 'bx:x:complaint:open') {
+        if (!dependencies.admin) throw adminUnavailable();
+        await interaction.showModal(dependencies.admin.complaintForm(interaction));
+        return;
+      }
       if (button && (interaction.customId.startsWith('bx:a:') || interaction.customId.startsWith('bx:x:train:'))) {
         await interaction.deferUpdate();
         updating = true;
       } else await interaction.deferReply({ flags: EPHEMERAL });
       let result;
-      if (button && interaction.customId.startsWith('bx:x:')) {
+      if (modal || (button && interaction.customId.startsWith('bx:x:'))) {
         if (!dependencies.admin) throw adminUnavailable();
-        result = await dependencies.admin.button(interaction);
+        result = modal ? await dependencies.admin.modal(interaction) : await dependencies.admin.button(interaction);
       } else result = button ? await communityButton(interaction, dependencies) : await command.run(interaction, dependencies);
       if (!Array.isArray(result)) {
         await interaction.editReply({ ...result, allowedMentions: NO_MENTIONS });
