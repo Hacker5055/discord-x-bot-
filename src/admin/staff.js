@@ -3,7 +3,7 @@ import { timestamp } from '../community/ui.js';
 import { AppError } from '../lib/errors.js';
 import { audit, auditLine, denied, fixedChoice, future, idOf, limits, memberRef, notFound, requestAt,
   safeTitle, stale, TEAMS } from './core.js';
-import { detailLines, requestLine, requestTeam } from './requests.js';
+import { detailLines, requestLine, requestTeam } from './records.js';
 
 const openFor = (a, team) => Object.values(a.requests).filter((r) => requestTeam[r.kind] === team && !r.closedAt).sort((l, r) => l.at - r.at);
 const taskLine = (t) => `• \`${t.id}\` · ${memberRef(t.assignee)} · ${timestamp(t.dueAt)} · ${safeTitle(t.title)}${t.doneAt ? ' · خلصت' : ''}`;

@@ -31,6 +31,7 @@ export class MemoryDiscord {
     { id: '100000000000000009', name: 'An unrelated higher role', position: 3, permissions: '0', managed: false },
   ];
   ownerId = OWNER_ID;
+  onboarding = { guild_id: GUILD_ID, enabled: false, default_channel_ids: [], prompts: [], mode: 0 };
   channels = [];
   threads = [];
   channelAudits = [];
@@ -54,6 +55,12 @@ export class MemoryDiscord {
     this.check(guildId);
     this.add('getGuild', 'GET');
     return { id: GUILD_ID, owner_id: this.ownerId, approximate_member_count: this.members.size };
+  }
+
+  async getOnboarding(guildId) {
+    this.check(guildId);
+    this.add('getOnboarding', 'GET');
+    return this.copy(this.onboarding);
   }
 
   async getMember(guildId, userId) {

@@ -3,6 +3,7 @@ import { Events } from 'discord.js';
 import { registerCommands, runCli } from './bootstrap.js';
 import { botHealth, createBot, loginBot } from './bot.js';
 import { createHttpServer } from './http/server.js';
+import { createSiteBridge } from './site/bridge.js';
 import { createProvisioner } from './provisioning.js';
 import { createRoleService } from './roles/sync.js';
 import { createAnimeService } from './community/anime.js';
@@ -29,7 +30,9 @@ await runCli(async (dependencies) => {
   const getHealth = () => botHealth(client, botUser, config.guildId);
   const worker = createScheduler({ api, store, guildId: config.guildId, log, now, ready: () => getHealth().ok,
     maintenance: () => admin.tick(client.guilds.cache.get(config.guildId)) });
-  const server = createHttpServer({ apiSecret: config.apiSecret, roles, anime, log, getHealth, catalogMonitor });
+  const siteBridge = config.siteBridgeSecret ? createSiteBridge({ admin, getHealth }) : undefined;
+  const server = createHttpServer({ apiSecret: config.apiSecret, roles, anime, log, getHealth, catalogMonitor,
+    siteBridgeSecret: config.siteBridgeSecret, siteBridge, now });
   let stopping;
 
   function shutdown() {

@@ -1,5 +1,6 @@
 import { CATEGORY_ENV, ROLE_KEYS, ROOM_KEYS, isSnowflake, roleEnv, roomEnv, webhookEnv } from './catalog.js';
 import { AppError } from './errors.js';
+import { validBridgeSecret } from '../site/contract.js';
 
 function invalid(key) {
   return new AppError('INVALID_CONFIG', `قيمة ${key} ناقصة أو غير صالحة في إعدادات البيئة.`);
@@ -41,6 +42,9 @@ export function readConfig(env = process.env) {
   const guildId = readId(env.DISCORD_GUILD_ID?.trim() || env.ALLOWED_GUILD_ID?.trim(), 'DISCORD_GUILD_ID');
   if (env.ALLOWED_GUILD_ID?.trim() && env.ALLOWED_GUILD_ID.trim() !== guildId) throw invalid('ALLOWED_GUILD_ID');
   const ownerId = readId(env.BX_OWNER_DISCORD_ID?.trim(), 'BX_OWNER_DISCORD_ID');
+  const siteBridgeSecret = env.BX_SITE_BRIDGE_SECRET || undefined;
+  if (siteBridgeSecret && (!validBridgeSecret(siteBridgeSecret) ||
+    [apiSecret, botToken, env.TURSO_AUTH_TOKEN?.trim()].includes(siteBridgeSecret))) throw invalid('BX_SITE_BRIDGE_SECRET');
   const portText = env.PORT?.trim() || '8080';
   const port = Number(portText);
   if (!/^\d{1,5}$/.test(portText) || port < 1 || port > 65535) throw invalid('PORT');
@@ -53,6 +57,7 @@ export function readConfig(env = process.env) {
   return Object.freeze({
     botToken, apiSecret, guildId, ownerId, port, categoryId, channelIds,
     adminVoice: env.BX_ADMIN_VOICE === '1', adminAutoMod: env.BX_ADMIN_AUTOMOD === '1',
+    welcomeGateway: env.BX_WELCOME === '1', siteBridgeSecret,
     databaseUrl: env.DATABASE_URL?.trim() || undefined, databaseCa: env.BX_DATABASE_CA?.trim() || undefined,
     tursoUrl: env.TURSO_DATABASE_URL?.trim() || undefined, tursoAuthToken: env.TURSO_AUTH_TOKEN?.trim() || undefined,
     roleIds: optionalRefs(env, ROLE_KEYS, roleEnv),

@@ -15,10 +15,10 @@ export const STRANGER = '100000000000000012';
 export const DIM = '100000000000000013';
 export const ANIME = { id: 'demo-1', title: 'Demo Anime', url: `${SITE_ORIGIN}/anime/demo`, episodes: 12, genres: ['mystery'] };
 
-export async function adminFixture({ voice = false, automod = false, setup = false } = {}) {
+export async function adminFixture({ voice = false, automod = false, setup = false, bridgeSecret, welcome = false } = {}) {
   const api = new MemoryDiscord();
   const store = createMemoryStore();
-  const config = readConfig({ ...fixtureEnv(), ...(voice ? { BX_ADMIN_VOICE: '1' } : {}), ...(automod ? { BX_ADMIN_AUTOMOD: '1' } : {}) });
+  const config = readConfig({ ...fixtureEnv(), ...(voice ? { BX_ADMIN_VOICE: '1' } : {}), ...(automod ? { BX_ADMIN_AUTOMOD: '1' } : {}), BX_SITE_BRIDGE_SECRET: bridgeSecret, BX_WELCOME: welcome ? '1' : undefined });
   const logs = [];
   const log = createLogger({ write: (value) => logs.push(value) });
   const clock = { at: Date.parse('2027-01-01T10:00:00Z') };
@@ -27,7 +27,7 @@ export async function adminFixture({ voice = false, automod = false, setup = fal
   const context = { api, store, config, log, botId: BOT_ID, now };
   const catalogMonitor = createCatalogMonitor();
   const roles = createRoleService(context);
-  const anime = createAnimeService({ store, secrets: [config.botToken, config.apiSecret], now });
+  const anime = createAnimeService({ store, secrets: [config.botToken, config.apiSecret, config.siteBridgeSecret], now });
   const restart = () => createAdministration({ ...context, roles, catalogMonitor });
   const admin = restart();
   const invoke = createInteractionHandler({ ...context, roles, admin, community: { store, anime, now } });

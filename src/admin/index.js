@@ -6,10 +6,12 @@ import { catalogStatus } from './catalog-status.js';
 import { automodMonitor, voiceRooms } from './gateway.js';
 import { discussionActions, guideActions } from './portal.js';
 import { deliverAnnouncements, incidentActions, publicationActions } from './publication.js';
-import { contentActions, ideaActions, moderationActions, ownRequests, ticketActions } from './requests.js';
+import { contentActions, ideaActions, moderationActions, ownRequests } from './requests.js';
 import { diagnosticActions, restoreLeases, roomActions } from './safety.js';
 import { knowledgeActions, staffActions } from './staff.js';
+import { ticketActions } from './tickets.js';
 import { trainingActions } from './training.js';
+import { welcomeActions } from './welcome.js';
 
 export const adminUnavailable = () => new AppError('ADMIN_DISABLED', 'أدوات الإدارة مش جاهزة للتشغيل دلوقتي.', 503);
 
@@ -35,7 +37,7 @@ export function createAdministration(dependencies) {
     }
   }
   return {
-    core: c, config: configActions(c), ticket, guide, staff: { ...staffActions(c), practice: training.practice }, kb: knowledgeActions(c),
+    core: c, config: configActions(c), ticket, guide, welcome: welcomeActions(c), staff: { ...staffActions(c), practice: training.practice }, kb: knowledgeActions(c),
     mod: moderationActions(c), content: contentActions(c), idea: ideaActions(c), diagnostics: diagnosticActions(c),
     room: roomActions(c), discussion: discussionActions(c), calendar: calendarActions(c), incident: incidentActions(c),
     publication: publicationActions(c), my: { view: ownRequests(c) }, auto, voice, report,

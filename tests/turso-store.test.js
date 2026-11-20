@@ -11,7 +11,7 @@ import { readConfig } from '../src/lib/env.js';
 import { AppError } from '../src/lib/errors.js';
 import { createLogger } from '../src/lib/log.js';
 import { configuredSecrets } from '../src/lib/redact.js';
-import { GUILD_ID, MEMBER_ID, OTHER_GUILD_ID, MemoryDiscord, fixtureEnv } from './fixtures/discord.js';
+import { GUILD_ID, MEMBER_ID, OTHER_GUILD_ID, MemoryDiscord, OWNER_ID, fixtureEnv } from './fixtures/discord.js';
 
 const URL = 'libsql://black-x-fixture.turso.io';
 const ENDPOINT = 'https://black-x-fixture.turso.io/v2/pipeline';
@@ -267,13 +267,17 @@ test('Turso does not report success on a malformed transaction reply; shutdown a
   await read;
 });
 
-test('Turso reads legacy guild state and round-trips opt-in administration and catalogue receipts in the same row', async () => {
+test('Turso reads legacy guild state and round-trips opt-in administration, bridge, welcome and catalogue receipts in the same row', async () => {
   const db = writer();
   const a = db.connect();
   assert.equal((await a.read()).admin, undefined);
   assert.equal(adminOf(await a.read()).enabled, false);
   await a.update((s) => {
     s.admin = { ...newAdmin(), enabled: true, version: 2, paused: { tickets: true } };
+    s.admin.siteBridge = { enabled: true, ownerId: OWNER_ID };
+    s.admin.welcome = { enabled: true, channelId: CHANNEL, ownerId: OWNER_ID, receipts: { joinFingerprint: NOW } };
+    s.admin.requests[CHANNEL] = { id: CHANNEL, kind: 'ticket', origin: 'site', status: 'open', by: MEMBER_ID,
+      shared: [{ id: 'fixtureMessage', origin: 'site', side: 'requester', body: 'رسالة اختبار', delivery: 'unconfirmed', at: NOW }] };
     s.admin.tasks[CHANNEL] = { id: CHANNEL, title: 'fixture task', at: NOW, dueAt: NOW + 120_000 };
     s.admin.audit.push({ team: 'support', action: 'task_assigned', at: NOW, target: CHANNEL });
   });
@@ -285,6 +289,11 @@ test('Turso reads legacy guild state and round-trips opt-in administration and c
   assert.deepEqual(persisted.catalogMeta, { at: NOW, batch: 1, removed: 0 });
   assert.equal(persisted.admin.version, 2);
   assert.deepEqual(persisted.admin.paused, { tickets: true });
+  assert.deepEqual(persisted.admin.siteBridge, { enabled: true, ownerId: OWNER_ID });
+  assert.equal(persisted.admin.welcome.receipts.joinFingerprint, NOW);
+  assert.deepEqual(persisted.admin.requests[CHANNEL].shared[0], {
+    id: 'fixtureMessage', origin: 'site', side: 'requester', body: 'رسالة اختبار', delivery: 'unconfirmed', at: NOW,
+  });
   assert.equal(persisted.admin.tasks[CHANNEL].title, 'fixture task');
   assert.deepEqual(persisted.admin.audit, [{ team: 'support', action: 'task_assigned', at: NOW, target: CHANNEL }]);
   assert.equal((await db.connect(OTHER_GUILD_ID).read()).admin, undefined);

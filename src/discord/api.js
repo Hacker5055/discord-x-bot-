@@ -90,6 +90,7 @@ export class DiscordApi {
 
   getCurrentUser() { return this.#request('GET', '/users/@me'); }
   getGuild(guildId) { return this.#request('GET', `/guilds/${guildId}?with_counts=true`); }
+  getOnboarding(guildId) { return this.#request('GET', `/guilds/${guildId}/onboarding`); }
   getMember(guildId, userId) { return this.#request('GET', `/guilds/${guildId}/members/${userId}`); }
   getRoles(guildId) { return this.#request('GET', `/guilds/${guildId}/roles`); }
   createRole(guildId, data, recover) { return this.#request('POST', `/guilds/${guildId}/roles`, data, recover); }
