@@ -56,7 +56,7 @@ async function readRoleBody(req) {
   return data;
 }
 
-export function createHttpServer({ apiSecret, roles, anime, getHealth, log, limit = 60, windowMs = 60_000, now = Date.now }) {
+export function createHttpServer({ apiSecret, roles, anime, getHealth, log, catalogMonitor, limit = 60, windowMs = 60_000, now = Date.now }) {
   const expected = hash(apiSecret);
   const rateLimit = createLimiter(limit, windowMs, now);
 
@@ -72,6 +72,7 @@ export function createHttpServer({ apiSecret, roles, anime, getHealth, log, limi
           : method === 'POST' && path === '/api/anime/episodes' ? 'anime_episode' : 'unknown');
     let status = 500;
     let failure = {};
+    let authenticated = false;
     try {
       // Do not trust client-provided forwarding headers.
       const retry = rateLimit(req.socket.remoteAddress ?? 'unknown');
@@ -84,6 +85,7 @@ export function createHttpServer({ apiSecret, roles, anime, getHealth, log, limi
         throw new AppError('UNAUTHORIZED', 'ترويسة X-BX-Secret ناقصة أو غير صحيحة.', 401);
       }
 
+      authenticated = true;
       let result;
       if (route === 'health') {
         result = await getHealth();
@@ -110,6 +112,7 @@ export function createHttpServer({ apiSecret, roles, anime, getHealth, log, limi
       status = error instanceof AppError ? error.status : 502;
       const code = error instanceof AppError ? error.code : 'DISCORD_REJECTED';
       failure = { ...mapped, code };
+      if (authenticated && route === 'anime_catalog') catalogMonitor?.reject({ at: now(), status, code });
       if (!req.complete && !req.destroyed) {
         res.setHeader('Connection', 'close');
         req.resume();

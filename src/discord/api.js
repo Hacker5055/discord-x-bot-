@@ -41,12 +41,16 @@ export class DiscordApi {
     await this.#sleep(ms);
   }
 
-  async #request(method, path, body, recover) {
+  async #request(method, path, body, recover, { reason, guarded } = {}) {
     const headers = { authorization: `Bot ${this.#token}`, 'user-agent': USER_AGENT };
     const payload = body === undefined ? undefined : JSON.stringify(body);
     if (payload !== undefined) headers['content-type'] = 'application/json';
+    if (reason) headers['x-audit-log-reason'] = encodeURIComponent(reason);
 
     for (let attempt = 0; ; attempt += 1) {
+      // A guarded write was authorized from a fresh observation. Do not delay or
+      // replay it behind a rate limit; its caller can observe again before retrying.
+      if (guarded && this.#globalRetryAt > this.#now()) throw new DiscordApiError(429);
       for (let delay = this.#globalRetryAt - this.#now(); delay > 0; delay = this.#globalRetryAt - this.#now()) {
         await this.#pause(Math.ceil(delay));
       }
@@ -69,9 +73,9 @@ export class DiscordApi {
         const delay = retryDelay(response, data, backoff);
         const global = data?.global === true || response.headers.get('x-ratelimit-global') === 'true';
         if (global) this.#globalRetryAt = Math.max(this.#globalRetryAt, this.#now() + delay);
-        if (attempt >= 3) throw error;
+        if (guarded || attempt >= 3) throw error;
         if (!global) await this.#pause(delay);
-      } else if (status >= 500 && status < 600 && attempt < 3) {
+      } else if (!guarded && status >= 500 && status < 600 && attempt < 3) {
         await this.#pause(backoff);
         // A failed POST may already have created the resource. Check its stable identity first.
         if (recover) {
@@ -95,7 +99,19 @@ export class DiscordApi {
   revokeRole(guildId, userId, roleId) { return this.#request('DELETE', `/guilds/${guildId}/members/${userId}/roles/${roleId}`); }
   getChannels(guildId) { return this.#request('GET', `/guilds/${guildId}/channels`); }
   createChannel(guildId, data, recover) { return this.#request('POST', `/guilds/${guildId}/channels`, data, recover); }
-  updateChannel(channelId, data) { return this.#request('PATCH', `/channels/${channelId}`, data); }
+  getChannel(channelId) { return this.#request('GET', `/channels/${channelId}`); }
+  updateChannel(channelId, data, options) { return this.#request('PATCH', `/channels/${channelId}`, data, undefined, options); }
+  deleteChannel(channelId) { return this.#request('DELETE', `/channels/${channelId}`, undefined, undefined, { guarded: true }); }
+  putOverwrite(channelId, id, data) { return this.#request('PUT', `/channels/${channelId}/permissions/${id}`, data, undefined, { guarded: true }); }
+  deleteOverwrite(channelId, id) { return this.#request('DELETE', `/channels/${channelId}/permissions/${id}`, undefined, undefined, { guarded: true }); }
+  moveMember(guildId, userId, channelId) {
+    return this.#request('PATCH', `/guilds/${guildId}/members/${userId}`, { channel_id: channelId }, undefined, { guarded: true });
+  }
+  getChannelAudits(guildId, after) {
+    return this.#request('GET', `/guilds/${guildId}/audit-logs?action_type=11&limit=100&after=${after}`);
+  }
+  getActiveThreads(guildId) { return this.#request('GET', `/guilds/${guildId}/threads/active`); }
+  createForumPost(channelId, data, recover) { return this.#request('POST', `/channels/${channelId}/threads`, data, recover); }
   async getWebhooks(channelId) {
     return (await this.#request('GET', `/channels/${channelId}/webhooks`)).map(webhookMetadata);
   }
@@ -112,7 +128,8 @@ export class DiscordApi {
       if (!(error instanceof DiscordApiError && error.status === 404)) throw error;
     }
   }
-  createMessage(channelId, data) { return this.#request('POST', `/channels/${channelId}/messages`, data); }
+  getMessage(channelId, messageId) { return this.#request('GET', `/channels/${channelId}/messages/${messageId}`); }
+  createMessage(channelId, data, options) { return this.#request('POST', `/channels/${channelId}/messages`, data, undefined, options); }
   editMessage(channelId, messageId, data) { return this.#request('PATCH', `/channels/${channelId}/messages/${messageId}`, data); }
   createDm(recipientId) { return this.#request('POST', '/users/@me/channels', { recipient_id: recipientId }); }
   registerGuildCommands(applicationId, guildId, commands) {

@@ -52,6 +52,7 @@ export function readConfig(env = process.env) {
 
   return Object.freeze({
     botToken, apiSecret, guildId, ownerId, port, categoryId, channelIds,
+    adminVoice: env.BX_ADMIN_VOICE === '1', adminAutoMod: env.BX_ADMIN_AUTOMOD === '1',
     databaseUrl: env.DATABASE_URL?.trim() || undefined, databaseCa: env.BX_DATABASE_CA?.trim() || undefined,
     tursoUrl: env.TURSO_DATABASE_URL?.trim() || undefined, tursoAuthToken: env.TURSO_AUTH_TOKEN?.trim() || undefined,
     roleIds: optionalRefs(env, ROLE_KEYS, roleEnv),

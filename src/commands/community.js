@@ -1,4 +1,7 @@
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { PARTY_DURATION } from '../admin/calendar.js';
+import { adminOf, live, TEXT_ROOMS } from '../admin/core.js';
+import { adminUnavailable } from '../admin/index.js';
 import { AppError } from '../lib/errors.js';
 import { configuredSecrets, createRedactor } from '../lib/redact.js';
 import { cleanText, siteUrl } from '../community/anime.js';
@@ -51,14 +54,28 @@ export const partyCommand = {
     .addSubcommand((sub) => sub.setName('schedule').setDescription('جدولة حفلة مشاهدة في الروم الحالي (للإدارة)')
       .addStringOption((opt) => required(opt, 'title', 'عنوان الحفلة', 90))
       .addStringOption((opt) => required(opt, 'starts_at', 'صيغة التاريخ والوقت: 2027-02-01T21:30+02:00', 28))
-      .addStringOption((opt) => required(opt, 'url', 'رابط المشاهدة من موقع BLACK X', 600)))
+      .addStringOption((opt) => required(opt, 'url', 'رابط المشاهدة من موقع BLACK X', 600))
+      .addIntegerOption((opt) => opt.setName('capacity').setDescription('سعة الحفلة لو فيها مقاعد محدودة').setMinValue(1).setMaxValue(200))
+      .addIntegerOption((opt) => opt.setName('minutes').setDescription('مدة الحفلة المتوقعة بالدقايق، افتراضي ٩٠').setMinValue(5).setMaxValue(360))
+      .addBooleanOption((opt) => opt.setName('force').setDescription('أكد التعارض المقصود مع الأجندة')))
     .addSubcommand((sub) => sub.setName('cancel').setDescription('إلغاء حفلة في الروم الحالي (للإدارة)')
       .addStringOption((opt) => required(opt, 'id', 'رقم الحفلة المكتوب على الكارت', 20))),
-  async run(interaction, { config, community }) {
-    requireModerator(interaction, config);
+  async run(interaction, { config, community, admin }) {
     const { store, now } = requireCommunity(community);
-    if (interaction.options.getSubcommand() === 'cancel') {
-      await cancelParty(store, { id: interaction.options.getString('id', true), channelId: interaction.channelId, now: now() });
+    const cancel = interaction.options.getSubcommand() === 'cancel';
+    const capacity = !cancel ? interaction.options.getInteger?.('capacity') ?? undefined : undefined;
+    const duration = !cancel ? interaction.options.getInteger?.('minutes') ?? undefined : undefined;
+    const force = !cancel && interaction.options.getBoolean?.('force') === true;
+    const extended = capacity !== undefined || duration !== undefined || force;
+    const settings = admin?.core.store ? adminOf(await admin.core.read()) : undefined;
+    if (extended && !settings) throw adminUnavailable();
+    if (extended) live(settings, 'events');
+    let auth;
+    if (extended || (settings?.enabled && settings.teams.events?.rooms.length)) {
+      auth = await admin.core.session(interaction, { team: 'events', types: TEXT_ROOMS, module: cancel ? undefined : 'events' });
+    } else requireModerator(interaction, config);
+    if (cancel) {
+      await cancelParty(store, { id: interaction.options.getString('id', true), channelId: interaction.channelId, now: now(), adminVersion: auth?.a.version, by: auth?.by });
       return ['اتلغت الحفلة والتذكيرات. لو الكارت منشور، هيتحدّث قريب.'];
     }
     requirePostChannel(interaction.channel, config.guildId, interaction.appPermissions);
@@ -67,7 +84,9 @@ export const partyCommand = {
       () => new AppError('INVALID_PARTY_TITLE', 'اكتب عنوانًا صالحًا من غير أي أسرار أو روابط Webhook.'));
     const url = siteUrl(cleanText(interaction.options.getString('url', true), 600, redact));
     const at = parsePartyDate(interaction.options.getString('starts_at', true));
-    await scheduleParty(store, { id: interaction.id, channelId: interaction.channelId, title, at, url }, now());
+    if (auth) admin.core.postNeeds(auth.w, auth.channel);
+    await scheduleParty(store, { id: interaction.id, channelId: interaction.channelId, title, at, url, capacity, minutes: duration ?? PARTY_DURATION,
+      force, adminVersion: auth?.a.version }, now());
     return [`اتجدولت الحفلة في ${timestamp(at)}. الكارت هيتنشر في الروم قريب. رقم الحفلة: \`${interaction.id}\`.`];
   },
 };
@@ -157,7 +176,7 @@ export async function communityButton(interaction, { community }) {
   const { quiz, store, now } = requireCommunity(community);
   match = /^bx:q:(\d{17,20}):([0-4]):([0-3])$/.exec(customId);
   if (match) return [quiz.answer({ id: match[1], channelId, messageId: message?.id, userId: user.id, index: Number(match[2]), choice: Number(match[3]) })];
-  match = /^bx:p:(\d{17,20}):(join|leave|remind|mute)$/.exec(customId);
+  match = /^bx:p:(\d{17,20}):(join|leave|remind|mute|confirm)$/.exec(customId);
   if (match) return [await respondParty(store, { id: match[1], channelId, messageId: message?.id, userId: user.id, action: match[2], now: now() })];
   match = /^bx:r:(add|remove):([a-z_]{1,20}):(\d{13}):(\d{17,20})$/.exec(customId);
   if (match) {

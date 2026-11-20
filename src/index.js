@@ -9,6 +9,8 @@ import { createAnimeService } from './community/anime.js';
 import { createScheduler } from './community/jobs.js';
 import { createQuizService } from './community/quiz.js';
 import { createCommunityStore } from './community/backend.js';
+import { createAdministration } from './admin/index.js';
+import { createCatalogMonitor } from './admin/catalog-status.js';
 import { configuredSecrets } from './lib/redact.js';
 
 await runCli(async (dependencies) => {
@@ -21,10 +23,13 @@ await runCli(async (dependencies) => {
   const now = Date.now;
   const anime = createAnimeService({ store, secrets: configuredSecrets(config), now });
   const quiz = createQuizService({ api, store, log, now });
-  const client = createBot({ ...context, roles, runSetup, community: { anime, quiz, store, now } });
+  const catalogMonitor = createCatalogMonitor();
+  const admin = createAdministration({ ...context, store, roles, now, catalogMonitor });
+  const client = createBot({ ...context, roles, runSetup, admin, community: { anime, quiz, store, now } });
   const getHealth = () => botHealth(client, botUser, config.guildId);
-  const worker = createScheduler({ api, store, guildId: config.guildId, log, now, ready: () => getHealth().ok });
-  const server = createHttpServer({ apiSecret: config.apiSecret, roles, anime, log, getHealth });
+  const worker = createScheduler({ api, store, guildId: config.guildId, log, now, ready: () => getHealth().ok,
+    maintenance: () => admin.tick(client.guilds.cache.get(config.guildId)) });
+  const server = createHttpServer({ apiSecret: config.apiSecret, roles, anime, log, getHealth, catalogMonitor });
   let stopping;
 
   function shutdown() {

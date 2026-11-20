@@ -8,6 +8,7 @@ import { DiscordApiError } from '../src/lib/errors.js';
 import { createLogger } from '../src/lib/log.js';
 import { provisionGuild } from '../src/provisioning.js';
 import { createRoleService } from '../src/roles/sync.js';
+import { ANIME, STRANGER, adminFixture, asText } from './fixtures/admin.js';
 import { BOT_ID, FAKE_API_SECRET, FAKE_BOT_TOKEN, FAKE_WEBHOOK_TOKEN, GUILD_ID, MEMBER_ID, MemoryDiscord,
   MISSING_MEMBER_ID, fixtureEnv } from './fixtures/discord.js';
 
@@ -108,4 +109,36 @@ test('HTTP per-IP limit returns 429 and Retry-After and ignores spoofable forwar
   await check(over, 429, 'RATE_LIMITED');
   clock += 60_000;
   await check(await request('/health'), 200);
+});
+
+test('integration status preserves the catalogue API, only tracks authenticated rejects, and does not infer full sync', async (t) => {
+  const f = await adminFixture();
+  const { request, lines } = await makeServer(t, { anime: f.anime, now: f.now, catalogMonitor: f.catalogMonitor });
+  const catalog = '/api/anime/catalog';
+  let lastAccepted;
+  for (let batch = 0; batch < 5; batch++) {
+    const items = Array.from({ length: 100 }, (_, index) => ({ ...ANIME, id: `item-${batch}-${index}` }));
+    const response = await request(catalog, { data: { items } });
+    assert.deepEqual(await check(response, 200), { ok: true, count: (batch + 1) * 100 });
+    lastAccepted = f.now();
+    f.clock.at += 1000;
+  }
+  const before = await f.store.read();
+  await check(await request(catalog, { data: { items: [{ ...ANIME, slug: FAKE_API_SECRET }] } }), 400, 'INVALID_ANIME_DATA');
+  assert.deepEqual(f.catalogMonitor.lastError(), { at: f.now(), status: 400, code: 'INVALID_ANIME_DATA' });
+  f.clock.at += 1000;
+  await check(await request(catalog, { data: { items: [ANIME] } }), 409, 'CATALOG_LIMIT');
+  f.clock.at += 1000;
+  await check(await request(catalog, { secret: 'not-authorized', data: { items: [] } }), 401, 'UNAUTHORIZED');
+  assert.deepEqual(await f.store.read(), before);
+  assert.deepEqual(before.catalogMeta, { at: lastAccepted, batch: 100, removed: 0 });
+  assert.equal(f.catalogMonitor.lastError().code, 'CATALOG_LIMIT');
+  assert.equal((await f.anime.recommend('أنمي')).embeds[0].fields.length, 3);
+  const report = f.make({ command: 'status', fields: { integration: true } });
+  await f.invoke(report);
+  assert.match(asText(report.replies), /الأعمال المحفوظة: 500.*409.*CATALOG_LIMIT.*مش دليل/);
+  const notStaff = f.make({ by: STRANGER, command: 'status', fields: { integration: true } });
+  await f.invoke(notStaff);
+  for (const text of [asText(report.replies), lines.join('\n')]) assert.doesNotMatch(text, new RegExp(FAKE_API_SECRET));
+  assert.doesNotMatch(asText(notStaff.replies), /500|CATALOG_LIMIT/);
 });

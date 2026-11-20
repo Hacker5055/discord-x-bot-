@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { ChannelType } from 'discord.js';
 import { compareRoles } from '../../src/discord/permissions.js';
 import { DiscordApiError } from '../../src/lib/errors.js';
 
@@ -29,7 +30,12 @@ export class MemoryDiscord {
     { id: '100000000000000008', name: 'An unrelated lower role', position: 1, permissions: '0', managed: false },
     { id: '100000000000000009', name: 'An unrelated higher role', position: 3, permissions: '0', managed: false },
   ];
+  ownerId = OWNER_ID;
   channels = [];
+  threads = [];
+  channelAudits = [];
+  voiceStates = new Map();
+  now = Date.now;
   hooks = [];
   messages = [];
   edits = [];
@@ -47,7 +53,7 @@ export class MemoryDiscord {
   async getGuild(guildId) {
     this.check(guildId);
     this.add('getGuild', 'GET');
-    return { id: GUILD_ID, owner_id: OWNER_ID, approximate_member_count: this.members.size };
+    return { id: GUILD_ID, owner_id: this.ownerId, approximate_member_count: this.members.size };
   }
 
   async getMember(guildId, userId) {
@@ -108,9 +114,76 @@ export class MemoryDiscord {
     return this.copy(channel);
   }
 
-  async updateChannel(channelId, data) {
+  channel(channelId) {
+    const channel = [...this.channels, ...this.threads].find(({ id }) => id === channelId);
+    if (!channel) throw new DiscordApiError(404, 10003);
+    return channel;
+  }
+
+  async getChannel(channelId) {
+    this.add('getChannel', 'GET', { channelId });
+    return this.copy(this.channel(channelId));
+  }
+
+  async updateChannel(channelId, data, options) {
     this.add('updateChannel', 'PATCH', { channelId, data });
-    return this.copy(Object.assign(this.channels.find(({ id }) => id === channelId), data));
+    const channel = this.channel(channelId);
+    if (Object.hasOwn(data, 'rate_limit_per_user')) this.offsetSlowMode(channelId, data.rate_limit_per_user, BOT_ID, options?.reason);
+    return this.copy(Object.assign(channel, data));
+  }
+
+  offsetSlowMode(channelId, value, actor, reason) {
+    const channel = this.channel(channelId);
+    const id = String((BigInt(this.now() - 1420070400000) << 22n) + BigInt(this.channelAudits.length + 1));
+    this.channelAudits.push({ id, target_id: channelId, action_type: 11, user_id: actor, reason,
+      changes: [{ key: 'rate_limit_per_user', old_value: channel.rate_limit_per_user ?? 0, new_value: value }] });
+    channel.rate_limit_per_user = value;
+  }
+
+  async getChannelAudits(guildId, after) {
+    this.check(guildId);
+    this.add('getChannelAudits', 'GET', { after });
+    return { audit_log_entries: this.copy(this.channelAudits.filter(({ id }) => BigInt(id) > BigInt(after)).slice(0, 100)) };
+  }
+
+  async deleteChannel(channelId) {
+    this.add('deleteChannel', 'DELETE', { channelId });
+    const channel = this.channel(channelId);
+    this.channels = this.channels.filter(({ id }) => id !== channelId);
+    return this.copy(channel);
+  }
+
+  async putOverwrite(channelId, userId, data) {
+    this.add('putOverwrite', 'PUT', { channelId, userId, data });
+    const overwrites = this.channel(channelId).permission_overwrites;
+    const index = overwrites.findIndex(({ id }) => id === userId);
+    if (index < 0) overwrites.push(this.copy({ id: userId, ...data }));
+    else overwrites[index] = this.copy({ id: userId, ...data });
+  }
+
+  async deleteOverwrite(channelId, userId) {
+    this.add('deleteOverwrite', 'DELETE', { channelId, userId });
+    const channel = this.channel(channelId);
+    channel.permission_overwrites = channel.permission_overwrites.filter(({ id }) => id !== userId);
+  }
+
+  async moveMember(guildId, userId, channelId) {
+    this.check(guildId);
+    this.add('moveMember', 'PATCH', { userId, channelId });
+    this.voiceStates.set(userId, { channelId });
+  }
+
+  async getActiveThreads(guildId) {
+    this.check(guildId);
+    this.add('getActiveThreads', 'GET');
+    return { threads: this.copy(this.threads.filter((t) => !t.thread_metadata?.archived)) };
+  }
+
+  async createForumPost(channelId, data) {
+    this.add('createForumPost', 'POST', { channelId, data });
+    const thread = { id: this.nextId(), guild_id: GUILD_ID, owner_id: BOT_ID, parent_id: channelId, type: ChannelType.PublicThread, ...this.copy(data) };
+    this.threads.push(thread);
+    return this.copy(thread);
   }
 
   async getWebhooks(channelId) {
@@ -137,14 +210,24 @@ export class MemoryDiscord {
 
   async createMessage(channelId, data) {
     this.add('createMessage', 'POST', { channelId });
+    const existing = data.enforce_nonce && this.messages.find((entry) => entry.channelId === channelId && entry.data.nonce === data.nonce);
+    if (existing) return this.copy(existing);
     const message = { channelId, data, id: this.nextId() };
     this.messages.push(this.copy(message));
     return this.copy(message);
   }
 
+  async getMessage(channelId, messageId) {
+    this.add('getMessage', 'GET', { channelId, messageId });
+    const original = this.messages.find(({ id, channelId: channel }) => channel === channelId && id === messageId);
+    if (!original) throw new DiscordApiError(404, 10008);
+    const edit = this.edits.findLast((entry) => entry.channelId === channelId && entry.messageId === messageId);
+    return this.copy({ ...original.data, ...edit?.data, id: messageId, channel_id: channelId, author: { id: BOT_ID } });
+  }
+
   async editMessage(channelId, messageId, data) {
     this.add('editMessage', 'PATCH', { channelId, messageId });
-    assert.ok(this.messages.some(({ id, channelId: channel }) => channel === channelId && id === messageId));
+    if (!this.messages.some(({ id, channelId: channel }) => channel === channelId && id === messageId)) throw new DiscordApiError(404, 10008);
     this.edits.push(this.copy({ channelId, messageId, data }));
     return { id: messageId };
   }

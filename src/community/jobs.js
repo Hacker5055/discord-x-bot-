@@ -34,9 +34,10 @@ function maintain(state, now) {
   state.lastDaily = date;
 }
 
-export function createScheduler({ store, api, guildId, log, ready = () => true, now = Date.now, intervalMs = 15_000 }) {
+export function createScheduler({ store, api, guildId, log, ready = () => true, now = Date.now, intervalMs = 15_000, maintenance }) {
   let timer;
   let running;
+  let maintaining;
   let stopped = false;
 
   async function dm(id, userId, payload) {
@@ -131,8 +132,11 @@ export function createScheduler({ store, api, guildId, log, ready = () => true, 
   }
 
   function tick() {
+    if (!store || stopped || !ready()) return Promise.resolve();
     running ??= processJobs().catch((error) => log.warn('community_worker_failed', errorFields(error))).finally(() => { running = undefined; });
-    return running;
+    if (maintenance) maintaining ??= Promise.resolve().then(maintenance)
+      .catch((error) => log.warn('admin_worker_failed', errorFields(error))).finally(() => { maintaining = undefined; });
+    return Promise.all([running, maintaining]);
   }
 
   return {
@@ -143,6 +147,6 @@ export function createScheduler({ store, api, guildId, log, ready = () => true, 
       timer.unref();
       void tick();
     },
-    async stop() { stopped = true; clearInterval(timer); await running; },
+    async stop() { stopped = true; clearInterval(timer); await Promise.all([running, maintaining]); },
   };
 }
