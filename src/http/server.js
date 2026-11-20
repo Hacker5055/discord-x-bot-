@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
-import { AppError, describeError, errorFields } from '../lib/errors.js';
+import { AppError, describeError, DiscordApiError, errorFields } from '../lib/errors.js';
+import { invalidSiteBody, knownSiteAction, MAX_SITE_BODY, SITE_PREFIX, validateSiteBody } from '../site/contract.js';
 
 const MAX_BODY = 8192;
 const MAX_ANIME_BODY = 128 * 1024;
@@ -56,9 +57,18 @@ async function readRoleBody(req) {
   return data;
 }
 
-export function createHttpServer({ apiSecret, roles, anime, getHealth, log, catalogMonitor, limit = 60, windowMs = 60_000, now = Date.now }) {
+export function createHttpServer({ apiSecret, roles, anime, getHealth, log, catalogMonitor, siteBridgeSecret, siteBridge,
+  limit = 60, siteLimit = 120, siteActorLimit = 20, windowMs = 60_000, now = Date.now }) {
   const expected = hash(apiSecret);
+  const bridgeExpected = siteBridgeSecret && siteBridgeSecret !== apiSecret && siteBridge ? hash(siteBridgeSecret) : undefined;
   const rateLimit = createLimiter(limit, windowMs, now);
+  const siteRateLimit = createLimiter(siteLimit, windowMs, now);
+  const actorRateLimit = createLimiter(siteActorLimit, windowMs, now, 2000);
+  const rateCheck = (retry, res) => {
+    if (!retry) return;
+    res.setHeader('Retry-After', retry);
+    throw new AppError('RATE_LIMITED', 'طلبات كثيرة؛ جرّب بعد قليل.', 429);
+  };
 
   return createServer({ requestTimeout: 15_000, headersTimeout: 10_000, maxHeaderSize: 8192 }, async (req, res) => {
     const started = now();
@@ -66,7 +76,9 @@ export function createHttpServer({ apiSecret, roles, anime, getHealth, log, cata
     const path = (req.url ?? '').split('?', 1)[0];
     const rolePath = /^\/api\/roles\/([^/]+)$/.exec(path);
     const action = method === 'POST' && rolePath && ['grant', 'revoke'].includes(rolePath[1]) ? rolePath[1] : undefined;
-    const route = method === 'GET' && path === '/health' ? 'health' : action
+    const bridgePath = path.startsWith(SITE_PREFIX);
+    const siteAction = bridgePath && method === 'POST' ? path.slice(SITE_PREFIX.length) : '';
+    const route = bridgePath ? knownSiteAction(siteAction) ? `site_${siteAction.replaceAll('/', '_')}` : 'site_unknown' : method === 'GET' && path === '/health' ? 'health' : action
       ?? (method === 'GET' && rolePath ? 'list_roles'
         : method === 'POST' && path === '/api/anime/catalog' ? 'anime_catalog'
           : method === 'POST' && path === '/api/anime/episodes' ? 'anime_episode' : 'unknown');
@@ -75,10 +87,20 @@ export function createHttpServer({ apiSecret, roles, anime, getHealth, log, cata
     let authenticated = false;
     try {
       // Do not trust client-provided forwarding headers.
-      const retry = rateLimit(req.socket.remoteAddress ?? 'unknown');
-      if (retry) {
-        res.setHeader('Retry-After', retry);
-        throw new AppError('RATE_LIMITED', 'طلبات كثيرة؛ جرّب بعد قليل.', 429);
+      const limiter = bridgePath ? siteRateLimit : rateLimit;
+      rateCheck(limiter(req.socket.remoteAddress ?? 'unknown'), res);
+      if (bridgePath) {
+        if (!bridgeExpected || !knownSiteAction(siteAction)) throw new AppError('NOT_FOUND', 'المسار غير موجود.', 404);
+        const supplied = req.headersDistinct['x-bx-bridge-secret'];
+        if (supplied?.length !== 1 || !timingSafeEqual(hash(supplied[0]), bridgeExpected)) {
+          throw new AppError('UNAUTHORIZED', 'مصادقة خادم الموقع غير صالحة.', 401);
+        }
+        const data = validateSiteBody(siteAction, await readJsonBody(req, invalidSiteBody, MAX_SITE_BODY));
+        rateCheck(actorRateLimit(data.discordId), res);
+        const result = await siteBridge.handle(siteAction, data);
+        status = 200;
+        send(res, status, { ok: true, ...result });
+        return;
       }
       const supplied = req.headersDistinct['x-bx-secret'];
       if (supplied?.length !== 1 || !timingSafeEqual(hash(supplied[0]), expected)) {
@@ -109,8 +131,9 @@ export function createHttpServer({ apiSecret, roles, anime, getHealth, log, cata
       send(res, status, result);
     } catch (error) {
       const mapped = errorFields(error);
-      status = error instanceof AppError ? error.status : 502;
-      const code = error instanceof AppError ? error.code : 'DISCORD_REJECTED';
+      const discordRateLimited = bridgePath && error instanceof DiscordApiError && error.status === 429;
+      status = error instanceof AppError ? error.status : discordRateLimited ? 429 : 502;
+      const code = error instanceof AppError ? error.code : discordRateLimited ? 'RATE_LIMITED' : 'DISCORD_REJECTED';
       failure = { ...mapped, code };
       if (authenticated && route === 'anime_catalog') catalogMonitor?.reject({ at: now(), status, code });
       if (!req.complete && !req.destroyed) {

@@ -1,10 +1,11 @@
 import { resolveRooms } from '../discord/state.js';
 import { AppError } from '../lib/errors.js';
-import { adminOf, audit, fixedChoice, idOf, INTERESTS, live, MODULES, ROOM_TYPES, roomRef, TEAMS, TEXT_ROOMS } from './core.js';
+import { bridgeEnabled } from '../site/session.js';
+import { adminOf, audit, fixedChoice, idOf, INTERESTS, live, MODULES, onboardingRoleName, ROOM_TYPES, roomRef, TEAMS, TEXT_ROOMS } from './core.js';
 
 export function configActions(c) {
   const changed = (i, action, target, update) => c.owner(i).then((by) => c.edit((a) => {
-    update(a);
+    update(a, by);
     a.version += 1;
     audit(a, 'ops', action, by, target, c.now());
   }));
@@ -20,7 +21,7 @@ export function configActions(c) {
       const roleId = idOf(role?.id);
       const w = await c.world();
       const destination = c.findRoom(w, idOf(channel?.id), TEXT_ROOMS);
-      if (!w.allRoles.some((r) => r.id === roleId && !r.managed && r.id !== c.guildId) ||
+      if (!w.allRoles.some((r) => r.id === roleId && !r.managed && r.id !== c.guildId && !onboardingRoleName(r.name)) ||
         c.productRole(w, roleId)) {
         throw new AppError('ADMIN_TEAM_ROLE', 'اختار رول فريق مخصص، مش رول VIP أو Creator أو رول بوت.');
       }
@@ -115,10 +116,19 @@ export function configActions(c) {
       });
       return [`\`${module}\` ${paused ? 'متوقفة مؤقتًا للعمليات الجديدة' : 'شغالة تاني'}.`];
     },
+    async bridge(i, { enabled }) {
+      await changed(i, enabled ? 'site_bridge_enabled' : 'site_bridge_disabled', 'site_bridge', (a, by) => {
+        if (enabled && !c.config.siteBridgeSecret) throw new AppError('SITE_BRIDGE_CONFIG', 'اضبط BX_SITE_BRIDGE_SECRET في بيئة البوت الأول.');
+        a.siteBridge = { enabled, ownerId: by };
+      });
+      return [enabled ? 'اتفعّل ربط الموقع للحسابات المرتبطة. التذاكر تحتاج إعداد الدعم وتفعيل الإدارة.' :
+        'اتوقف ربط الموقع ومشاركة الردود الجديدة. تذاكر ديسكورد وسجلها لم يتغيروا.'];
+    },
     async panel(i) {
       await c.owner(i);
       const a = adminOf(await c.read());
       return [`أدوات الإدارة: ${a.enabled ? 'مفعّلة' : 'متوقفة'}.`,
+        `ربط الموقع: ${bridgeEnabled(c, a) ? 'مفعّل' : 'متوقف'}.`,
         `الميزات المتوقفة: ${Object.keys(a.paused).join('، ') || 'مفيش'}.`,
         ...Object.entries(a.rooms).map(([key, id]) => `• \`${key}\`: ${roomRef(id)}`),
         ...Object.entries(a.teams).map(([key, { rooms, roleId }]) => `• فريق \`${key}\` (رول \`${roleId}\`): ${rooms.map(roomRef).join('، ') || 'مفيش نطاق'}`),

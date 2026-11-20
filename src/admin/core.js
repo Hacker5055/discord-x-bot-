@@ -14,9 +14,10 @@ import { configuredSecrets, createRedactor } from '../lib/redact.js';
 export const TEAMS = ['support', 'moderation', 'events', 'content', 'ops'];
 export const MODULES = ['tickets', 'suggestions', 'content', 'events', 'announcements', 'voice', 'automod'];
 export const INTERESTS = { news: 'أخبار الموقع', events: 'حفلات المشاهدة', quiz: 'المسابقات' };
+export const onboardingRoleName = (name) => /^(?:members|boy|girl)$/iu.test(name.trim());
 export const TEXT_ROOMS = [ChannelType.GuildText, ChannelType.GuildAnnouncement];
 export const ROOM_TYPES = {
-  ticket_panel: TEXT_ROOMS, ticket_category: [ChannelType.GuildCategory], incident: TEXT_ROOMS,
+  ticket_panel: TEXT_ROOMS, site_staff: TEXT_ROOMS, ticket_category: [ChannelType.GuildCategory], incident: TEXT_ROOMS,
   suggestions: TEXT_ROOMS, forum: [ChannelType.GuildForum], guest: [ChannelType.GuildText],
   voice_lobby: [ChannelType.GuildVoice], voice_category: [ChannelType.GuildCategory],
 };
@@ -182,15 +183,15 @@ export function createAdminCore({ api, config, botId, store, roles, log, catalog
   const productRole = (w, roleId) => Object.values(config.roleIds).includes(roleId) ||
     Object.values(resolveRoles(w.allRoles, config)).some(({ id }) => id === roleId) ||
     w.allRoles.some((r) => r.id === roleId && Object.values(ROLES).some(({ name }) => name === r.name));
-  function ordinaryRole(w, a, roleId) {
+  function ordinaryRole(w, a, roleId, { manageable = true } = {}) {
     const role = w.allRoles.find(({ id }) => id === roleId);
-    if (!canManageRole(w.botRole, role, guildId) || BigInt(role.permissions) !== 0n ||
+    if (!role || role.managed || role.id === guildId || (manageable && !canManageRole(w.botRole, role, guildId)) || BigInt(role.permissions) !== 0n ||
       productRole(w, roleId) ||
       Object.values(a.teams).some((team) => team.roleId === roleId) ||
       w.channels.some((channel) => channel.permission_overwrites?.some((o) => o.type === 0 && o.id === roleId))) {
       throw new AppError('ADMIN_UNSAFE_ROLE', 'اختار رول اهتمام عادي: بدون صلاحيات أو أذونات رومات، وتحت رول البوت.', 403);
     }
-    botNeeds(w, undefined, P.ManageRoles);
+    if (manageable) botNeeds(w, undefined, P.ManageRoles);
     return role;
   }
   return { api, config, botId, roles, log, catalogMonitor, store, guildId, now, read, edit, text, redact, assertGuild,

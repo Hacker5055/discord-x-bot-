@@ -1,6 +1,7 @@
 import { ChannelType as C, PermissionFlagsBits as P, SlashCommandBuilder } from 'discord.js';
 import { adminUnavailable } from '../admin/index.js';
 import { adminOf, INTERESTS, MODULES, ROOM_TYPES, TEAMS, TEXT_ROOMS } from '../admin/core.js';
+import { SOCIAL_PLATFORMS } from '../admin/welcome.js';
 import { AppError } from '../lib/errors.js';
 
 const option = (type, name, description, more, required = true) => ({ type, name, description, more, required });
@@ -64,13 +65,16 @@ export const adminCommands = [
       channel('channel', 'الروم أو الكاتيجوري', [...TEXT_ROOMS, C.GuildCategory, C.GuildForum, C.GuildVoice])),
     r('interest', 'اضبط رول اهتمام عادي في لوحة ابدأ هنا', choice('interest', 'نوع الاهتمام', Object.keys(INTERESTS)), role(false)),
     r('pause', 'أوقف ميزة واحدة أو رجّعها من غير ريستارت', choice('module', 'اسم الميزة', MODULES), bool('paused', 'توقف مؤقت', true)),
+    r('bridge', 'تفعيل أو إيقاف ربط الموقع من غير تغيير التذاكر', bool('enabled', 'حالة ربط الموقع', true)),
     method(r('settings', 'اعرض التفعيل والتفويض والرومات المربوطة'), 'panel'),
   ], { owner: true }),
   command('ticket', 'تذاكر BLACK X الخاصة', 'ticket', [
     r('panel', 'انشر لوحة فتح التذاكر في روم الدعم المضبوط'),
     r('open', 'افتح تذكرة خاصة من روم الدعم', choice('type', 'نوع الطلب', ['site', 'report'])),
     r('claim', 'استلم تذكرة لفريق الدعم', id()),
-    r('reply', 'ابعت ردًا في روم التذكرة واحسب أول رد', id(), text('body', 'الرد الخاص بصاحب التذكرة', 1000)),
+    r('reply', 'ابعت ردًا في روم التذكرة واحسب أول رد', id(), text('body', 'الرد الخاص بصاحب التذكرة', 1000),
+      bool('share', 'شارك الرد أيضًا في الموقع لصاحب التذكرة والدعم')),
+    r('share', 'صاحب التذكرة: ابعت رسالة مشتركة من داخل روم تذكرتك', id(), text('body', 'الرسالة المشتركة مع الموقع', 1000)),
     r('close', 'اقفل التذكرة للكتابة من غير حذف', id(), reason()),
   ]),
   command('staff', 'متابعة الطلبات والمهام والسجل داخل الفريق', 'staff', [
@@ -114,6 +118,16 @@ export const adminCommands = [
   ]),
   command('guide', 'لوحة قوانين واهتمامات «ابدأ هنا»', 'guide', [
     r('publish', 'انشر لوحة ابدأ هنا في الروم الحالي', channel('rules', 'روم القوانين')),
+  ], { owner: true }),
+  command('welcome', 'ترحيب شخصي من مالك BLACK X ومعاينة أسئلة الدخول', 'welcome', [
+    r('configure', 'احفظ روم الترحيب واسم المالك ونص الرسالة', channel(), text('owner_name', 'الاسم العلني للمالك', 64),
+      text('message', 'رسالة الترحيب للأعضاء الجدد', 1200)),
+    r('social', 'أضف حسابًا علنيًا، أو اترك الرابط فاضيًا لإزالته', choice('platform', 'المنصة', SOCIAL_PLATFORMS),
+      text('url', 'رابط HTTPS مباشر للبروفايل', 300, false)),
+    r('preview', 'عاين ترحيبك في رد خاص من غير إرسال في الروم'),
+    r('enable', 'فعّل أو أوقف الترحيب بالأعضاء الجدد', bool('enabled', 'حالة الترحيب', true)),
+    r('onboarding', 'افحص رولات أسئلة Discord Onboarding الحالية من غير تعديل',
+      option('Role', 'members', 'رول Members الآمن'), option('Role', 'boy', 'رول Boy الآمن'), option('Role', 'girl', 'رول Girl الآمن')),
   ], { owner: true }),
   command('idea', 'اقتراحات BLACK X وتصويت ومراجعة', 'idea', [
     r('add', 'سجّل اقتراح في الروم المضبوط', title(), text('note', 'تفاصيل مختصرة', 300)),

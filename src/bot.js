@@ -82,6 +82,7 @@ export function createInteractionHandler(dependencies) {
 export function createBot(dependencies) {
   const { config, log, admin } = dependencies;
   const intents = [GatewayIntentBits.Guilds];
+  if (admin?.core.store && config.welcomeGateway) intents.push(GatewayIntentBits.GuildMembers);
   if (admin?.core.store && config.adminVoice) intents.push(GatewayIntentBits.GuildVoiceStates);
   if (admin?.core.store && config.adminAutoMod) intents.push(GatewayIntentBits.AutoModerationExecution);
   const client = new Client({ intents, allowedMentions: NO_MENTIONS });
@@ -106,6 +107,13 @@ export function createBot(dependencies) {
     void handleInteraction(interaction).catch(() => log.warn('interaction_handler_failed'));
   });
   if (admin?.core.store) {
+    if (config.welcomeGateway) {
+      const welcome = (member) => void admin.welcome.join(member).catch((error) => log.warn('welcome_failed', errorFields(error)));
+      client.on(Events.GuildMemberAdd, welcome);
+      client.on(Events.GuildMemberUpdate, (before, after) => {
+        if (before.pending === true && after.pending === false) welcome(after);
+      });
+    }
     if (config.adminVoice) client.on(Events.VoiceStateUpdate, (before, after) => {
       void admin.voice.join(before, after).catch((error) => log.warn('admin_voice_failed', errorFields(error)));
     });
@@ -127,7 +135,7 @@ export async function loginBot(client, token) {
       throw new AppError('GATEWAY_AUTH_FAILED', 'تعذّرت مصادقة Gateway. راجع DISCORD_BOT_TOKEN محليًا.');
     }
     if (error?.code === 4014 || /disallowed intents/i.test(error?.message ?? '')) {
-      throw new AppError('GATEWAY_INTENTS', 'Discord رفض الـ intents. البوت ما بيحتاجش Privileged Intents.');
+      throw new AppError('GATEWAY_INTENTS', 'Discord رفض الـ intents. لو فعّلت BX_WELCOME=1، فعّل Server Members Intent أو أوقف الترحيب. Message Content غير مطلوب.');
     }
     throw new AppError('GATEWAY_LOGIN_FAILED', 'تعذّر تسجيل الدخول إلى Discord Gateway. راجع الاتصال وإعداد البوت.');
   }
