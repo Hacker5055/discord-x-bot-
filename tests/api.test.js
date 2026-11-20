@@ -91,3 +91,20 @@ test('the production adapter drops webhook credentials when reading or creating 
   assert.deepEqual(await api.getWebhooks(GUILD_ID), [hook]);
   assert.deepEqual(await api.createWebhook(GUILD_ID, { name: hook.name }), hook);
 });
+
+test('guarded Discord writes include a narrow audit reason and never replay a potentially stale observation', async () => {
+  const channelId = '100000000000000099';
+  const result = stub(jsonResponse(502, {}), jsonResponse(200, { audit_log_entries: [] }));
+  await assert.rejects(result.api.updateChannel(channelId, { rate_limit_per_user: 10 }, { reason: 'BLACK X test', guarded: true }), { status: 502 });
+  assert.equal(result.calls.length, 1);
+  assert.equal(result.calls[0].options.headers['x-audit-log-reason'], 'BLACK%20X%20test');
+  assert.deepEqual(JSON.parse(result.calls[0].options.body), { rate_limit_per_user: 10 });
+  assert.deepEqual(await result.api.getChannelAudits(GUILD_ID, '0'), { audit_log_entries: [] });
+  assert.match(result.calls[1].url, /\/audit-logs\?action_type=11&limit=100&after=0$/);
+  assert.deepEqual(result.waits, []);
+  const limited = stub(jsonResponse(429, { retry_after: 10, global: true }));
+  await assert.rejects(limited.api.deleteChannel(channelId), { status: 429 });
+  await assert.rejects(limited.api.deleteChannel(channelId), { status: 429 });
+  assert.equal(limited.calls.length, 1);
+  assert.deepEqual(limited.waits, []);
+});

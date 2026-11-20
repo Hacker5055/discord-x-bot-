@@ -49,6 +49,8 @@ test('bootstrap fetches the bot and registers all commands on the configured gui
   assert.equal(registration.applicationId, BOT_ID);
   assert.deepEqual(registration.commands.map(({ name }) => name), [
     'setup', 'announce', 'role', 'status', 'arena', 'party', 'follow', 'recommend', 'adhkar', 'prayer', 'daily', 'ramadan', 'seerah',
+    'admin', 'ticket', 'staff', 'mod', 'kb', 'incident', 'access', 'layout', 'room', 'guide', 'idea', 'content', 'discussion',
+    'calendar', 'my', 'schedule', 'automod',
   ]);
   assert.equal(registration.commands[0].options[0].name, 'dry_run');
   assert.deepEqual(registration.commands[2].options.map(({ name }) => name), ['grant', 'revoke']);

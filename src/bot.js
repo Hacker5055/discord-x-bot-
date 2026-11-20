@@ -1,4 +1,5 @@
 import { Client, Events, GatewayIntentBits, MessageFlags, Status } from 'discord.js';
+import { adminUnavailable } from './admin/index.js';
 import { commands } from './commands/index.js';
 import { communityButton } from './commands/community.js';
 import { NO_MENTIONS } from './community/ui.js';
@@ -48,11 +49,15 @@ export function createInteractionHandler(dependencies) {
         throw new AppError('GUILD_NOT_ALLOWED', 'البوت مخصص لسيرفر BLACK X الرسمي فقط.', 403);
       }
       if (chat && !command) throw new AppError('UNKNOWN_COMMAND', 'الأمر غير معروف. أعد تسجيل أوامر السيرفر.');
-      if (button && interaction.customId.startsWith('bx:a:')) {
+      if (button && (interaction.customId.startsWith('bx:a:') || interaction.customId.startsWith('bx:x:train:'))) {
         await interaction.deferUpdate();
         updating = true;
       } else await interaction.deferReply({ flags: EPHEMERAL });
-      const result = button ? await communityButton(interaction, dependencies) : await command.run(interaction, dependencies);
+      let result;
+      if (button && interaction.customId.startsWith('bx:x:')) {
+        if (!dependencies.admin) throw adminUnavailable();
+        result = await dependencies.admin.button(interaction);
+      } else result = button ? await communityButton(interaction, dependencies) : await command.run(interaction, dependencies);
       if (!Array.isArray(result)) {
         await interaction.editReply({ ...result, allowedMentions: NO_MENTIONS });
       } else {
@@ -75,8 +80,11 @@ export function createInteractionHandler(dependencies) {
 }
 
 export function createBot(dependencies) {
-  const { config, log } = dependencies;
-  const client = new Client({ intents: [GatewayIntentBits.Guilds], allowedMentions: NO_MENTIONS });
+  const { config, log, admin } = dependencies;
+  const intents = [GatewayIntentBits.Guilds];
+  if (admin?.core.store && config.adminVoice) intents.push(GatewayIntentBits.GuildVoiceStates);
+  if (admin?.core.store && config.adminAutoMod) intents.push(GatewayIntentBits.AutoModerationExecution);
+  const client = new Client({ intents, allowedMentions: NO_MENTIONS });
   const handleInteraction = createInteractionHandler(dependencies);
 
   async function enforceGuild(guild) {
@@ -97,6 +105,12 @@ export function createBot(dependencies) {
   client.on(Events.InteractionCreate, (interaction) => {
     void handleInteraction(interaction).catch(() => log.warn('interaction_handler_failed'));
   });
+  if (admin?.core.store) {
+    if (config.adminVoice) client.on(Events.VoiceStateUpdate, (before, after) => {
+      void admin.voice.join(before, after).catch((error) => log.warn('admin_voice_failed', errorFields(error)));
+    });
+    if (config.adminAutoMod) client.on(Events.AutoModerationActionExecution, (event) => admin.auto.observe(event));
+  }
   client.on(Events.Error, () => log.warn('gateway_error'));
   client.on(Events.ShardError, () => log.warn('gateway_shard_error'));
   client.on(Events.ShardDisconnect, ({ code }, shardId) => log.warn('gateway_disconnected', { code, shardId }));
@@ -113,7 +127,7 @@ export async function loginBot(client, token) {
       throw new AppError('GATEWAY_AUTH_FAILED', 'تعذّرت مصادقة Gateway. راجع DISCORD_BOT_TOKEN محليًا.');
     }
     if (error?.code === 4014 || /disallowed intents/i.test(error?.message ?? '')) {
-      throw new AppError('GATEWAY_INTENTS', 'Discord رفض الـ intents. البوت يحتاج Guilds فقط، دون Privileged Intents.');
+      throw new AppError('GATEWAY_INTENTS', 'Discord رفض الـ intents. البوت ما بيحتاجش Privileged Intents.');
     }
     throw new AppError('GATEWAY_LOGIN_FAILED', 'تعذّر تسجيل الدخول إلى Discord Gateway. راجع الاتصال وإعداد البوت.');
   }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { adminOf, newAdmin } from '../src/admin/core.js';
 import { createAnimeService } from '../src/community/anime.js';
 import { createCommunityStore } from '../src/community/backend.js';
 import { setDaily } from '../src/community/islamic.js';
@@ -264,4 +265,28 @@ test('Turso does not report success on a malformed transaction reply; shutdown a
   await requested;
   conn.close();
   await read;
+});
+
+test('Turso reads legacy guild state and round-trips opt-in administration and catalogue receipts in the same row', async () => {
+  const db = writer();
+  const a = db.connect();
+  assert.equal((await a.read()).admin, undefined);
+  assert.equal(adminOf(await a.read()).enabled, false);
+  await a.update((s) => {
+    s.admin = { ...newAdmin(), enabled: true, version: 2, paused: { tickets: true } };
+    s.admin.tasks[CHANNEL] = { id: CHANNEL, title: 'fixture task', at: NOW, dueAt: NOW + 120_000 };
+    s.admin.audit.push({ team: 'support', action: 'task_assigned', at: NOW, target: CHANNEL });
+  });
+  const anime = createAnimeService({ store: a, now: () => NOW });
+  assert.deepEqual(await anime.updateCatalog({ items: [ENTRY] }), { count: 1 });
+  a.close();
+  const b = db.connect();
+  const persisted = await b.read();
+  assert.deepEqual(persisted.catalogMeta, { at: NOW, batch: 1, removed: 0 });
+  assert.equal(persisted.admin.version, 2);
+  assert.deepEqual(persisted.admin.paused, { tickets: true });
+  assert.equal(persisted.admin.tasks[CHANNEL].title, 'fixture task');
+  assert.deepEqual(persisted.admin.audit, [{ team: 'support', action: 'task_assigned', at: NOW, target: CHANNEL }]);
+  assert.equal((await db.connect(OTHER_GUILD_ID).read()).admin, undefined);
+  b.close();
 });

@@ -93,6 +93,7 @@ export function createAnimeService({ store, secrets, now = Date.now }) {
         for (const item of items) state.catalog[item.id] = item;
         const count = Object.keys(state.catalog).length;
         if (count > MAX_CATALOG) throw new AppError('CATALOG_LIMIT', 'الحد ٥٠٠ عمل متزامن. احذف الأعمال القديمة قبل الإضافة.', 409);
+        state.catalogMeta = { at: now(), batch: items.length, removed: removals.size };
         return { count };
       });
     },
