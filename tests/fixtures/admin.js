@@ -46,16 +46,18 @@ export async function adminFixture({ voice = false, automod = false, setup = fal
     for (const id of users) api.members.get(id).roles.push(role.id);
     return role;
   };
-  const make = ({ by = OWNER_ID, channel = publicRoom, command, action, fields = {}, customId, messageId, ownerId = api.ownerId, guildId = GUILD_ID } = {}) => {
+  const make = ({ by = OWNER_ID, channel = publicRoom, command, action, fields = {}, customId, messageId, modal = false, ownerId = api.ownerId, guildId = GUILD_ID } = {}) => {
     const replies = [];
     const value = (k) => fields[k] ?? null;
     return {
       replies, id: api.nextId(), guildId, user: { id: by, bot: by === BOT_ID }, guild: { ownerId }, channelId: channel?.id,
       channel: { guildId, type: channel?.type, id: channel?.id }, appPermissions: new PermissionsBitField(BigInt(botRole.permissions)),
       memberPermissions: new PermissionsBitField(by === OWNER_ID ? P.ManageGuild : 0n),
-      isChatInputCommand: () => !customId, isButton: () => Boolean(customId), customId, message: messageId && { id: messageId },
+      isChatInputCommand: () => !customId, isButton: () => Boolean(customId) && !modal, isModalSubmit: () => modal, customId, message: messageId && { id: messageId },
       commandName: command, options: { getSubcommand: () => action, getString: value, getChannel: value,
         getBoolean: value, getRole: value, getUser: value, getInteger: value, getFocused: () => fields.focused },
+      fields: { getTextInputValue: value },
+      async showModal(payload) { this.replied = true; replies.push(['modal', payload.toJSON()]); },
       async deferReply(payload) { this.deferred = true; replies.push(['defer', payload]); },
       async deferUpdate() { this.deferred = true; replies.push(['update']); },
       async reply(payload) { this.replied = true; replies.push(['reply', payload]); },

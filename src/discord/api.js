@@ -1,4 +1,5 @@
 import { setTimeout as wait } from 'node:timers/promises';
+import { isSnowflake } from '../lib/catalog.js';
 import { DiscordApiError } from '../lib/errors.js';
 
 const BASE_URL = 'https://discord.com/api/v10';
@@ -92,6 +93,17 @@ export class DiscordApi {
   getGuild(guildId) { return this.#request('GET', `/guilds/${guildId}?with_counts=true`); }
   getOnboarding(guildId) { return this.#request('GET', `/guilds/${guildId}/onboarding`); }
   getMember(guildId, userId) { return this.#request('GET', `/guilds/${guildId}/members/${userId}`); }
+  async listGuildMembers(guildId, { limit = 1000, after } = {}) {
+    if (!isSnowflake(guildId) || !Number.isInteger(limit) || limit < 1 || limit > 1000 || (after !== undefined && !isSnowflake(after))) {
+      throw new DiscordApiError(400);
+    }
+    const params = new URLSearchParams({ limit: String(limit), ...(after ? { after } : {}) });
+    const data = await this.#request('GET', `/guilds/${guildId}/members?${params}`, undefined, undefined, { guarded: true });
+    if (!Array.isArray(data) || data.length > limit) throw new DiscordApiError(502);
+    // Only retain fields required for live complaint routing.
+    return data.map(({ user, roles, pending, communication_disabled_until }) => ({ user: { id: user?.id, bot: user?.bot },
+      roles, pending, communication_disabled_until }));
+  }
   getRoles(guildId) { return this.#request('GET', `/guilds/${guildId}/roles`); }
   createRole(guildId, data, recover) { return this.#request('POST', `/guilds/${guildId}/roles`, data, recover); }
   updateRole(guildId, roleId, data) { return this.#request('PATCH', `/guilds/${guildId}/roles/${roleId}`, data); }
@@ -132,7 +144,7 @@ export class DiscordApi {
   getMessage(channelId, messageId) { return this.#request('GET', `/channels/${channelId}/messages/${messageId}`); }
   createMessage(channelId, data, options) { return this.#request('POST', `/channels/${channelId}/messages`, data, undefined, options); }
   editMessage(channelId, messageId, data) { return this.#request('PATCH', `/channels/${channelId}/messages/${messageId}`, data); }
-  createDm(recipientId) { return this.#request('POST', '/users/@me/channels', { recipient_id: recipientId }); }
+  createDm(recipientId, options) { return this.#request('POST', '/users/@me/channels', { recipient_id: recipientId }, undefined, options); }
   registerGuildCommands(applicationId, guildId, commands) {
     return this.#request('PUT', `/applications/${applicationId}/guilds/${guildId}/commands`, commands);
   }
