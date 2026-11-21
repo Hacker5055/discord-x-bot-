@@ -138,15 +138,28 @@ export function automodMonitor(c) {
       pending = new Map();
       if (!snapshot.enabled || snapshot.paused.automod) return;
       const cutoff = Math.floor(c.now() / DAY) - 13;
-      await c.edit((a) => {
-        if (!a.enabled || a.paused.automod || a.version !== snapshot.version) return;
-        for (const [key, value] of Object.entries(a.automod)) if (value.day < cutoff) delete a.automod[key];
-        let size = Object.keys(a.automod).length;
-        for (const [key, value] of batch) {
-          if (a.automod[key]) a.automod[key].count = Math.min(a.automod[key].count + value.count, 2_000_000_000);
-          else if (size < 500) { a.automod[key] = value; size += 1; }
+      try {
+        await c.edit((a) => {
+          if (!a.enabled || a.paused.automod || a.version !== snapshot.version) return;
+          for (const [key, value] of Object.entries(a.automod)) if (value.day < cutoff) delete a.automod[key];
+          let size = Object.keys(a.automod).length;
+          for (const [key, value] of batch) {
+            if (a.automod[key]) a.automod[key].count = Math.min(a.automod[key].count + value.count, 2_000_000_000);
+            else if (size < 500) { a.automod[key] = value; size += 1; }
+          }
+        });
+      } catch (error) {
+        // Keep failed counts and merge events received during the write. Preserve the
+        // existing 250-key memory bound, prioritizing the older, unsaved batch.
+        const restored = new Map(batch);
+        for (const [key, value] of pending) {
+          const prior = restored.get(key);
+          if (prior) restored.set(key, { ...prior, count: Math.min(prior.count + value.count, 2_000_000_000) });
+          else if (restored.size < 250) restored.set(key, value);
         }
-      });
+        pending = restored;
+        throw error;
+      }
     },
     async summary(i) {
       const ctx = await c.session(i, { team: 'moderation' });
