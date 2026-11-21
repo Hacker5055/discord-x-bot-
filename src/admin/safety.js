@@ -5,7 +5,7 @@ import { timestamp } from '../community/ui.js';
 import { guildPermissions, hasPermission } from '../discord/permissions.js';
 import { truncate } from '../lib/catalog.js';
 import { AppError, DiscordApiError, errorFields } from '../lib/errors.js';
-import { adminOf, audit, denied, fixedChoice, idOf, isMissing, limits, live, memberRef, requestAt, roomRef,
+import { adminOf, audit, denied, fixedChoice, idOf, isMissing, limits, live, memberRef, notFound, requestAt, roomRef,
   safeTitle, stale, TEXT_ROOMS, within } from './core.js';
 
 const v = P.ViewChannel;
@@ -356,4 +356,4 @@ export async function restoreLeases(c, snapshot) {
       }
     });
   });
-}
+                    }
