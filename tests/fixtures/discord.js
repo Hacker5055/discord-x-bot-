@@ -12,7 +12,7 @@ export const MOD_ID = '100000000000000005';
 export const OTHER_GUILD_ID = '100000000000000006';
 export const MISSING_MEMBER_ID = '100000000000000007';
 export const FAKE_BOT_TOKEN = 'mock-bot-credential-not-for-discord';
-export const FAKE_API_SECRET = 'mock-api-credential-not-for-production';
+export const FAKE_API_SECRET = 'mock-api-credential-not-for-production-0123456789';
 export const FAKE_WEBHOOK_TOKEN = 'mock-webhook-credential-not-for-discord';
 export const INVITE_BITS = '805391376'; // Standard BLACK X permissions plus optional Manage Webhooks.
 const BASE_ID = 100000000000000100n;
@@ -256,4 +256,4 @@ export class MemoryDiscord {
     this.add('registerGuildCommands', 'PUT', { applicationId, guildId, commands });
     return this.copy(commands);
   }
-}
+  }
