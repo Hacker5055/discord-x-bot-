@@ -47,13 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          metadata="$RUNNER_TEMP/black-x-web-build.json"
-          docker buildx build --platform linux/amd64 --load --provenance=false --sbom=false \
-            --metadata-file "$metadata" --tag "registry.heroku.com/$HEROKU_APP_NAME/web" .
-          if ! config=$(jq -er '."containerimage.config.digest" | strings | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata"); then
-            echo '::error::The single-platform build did not return a valid image configuration digest.'
-            exit 1
-          fi
+          config=$(bash .github/scripts/build-heroku-web.sh "registry.heroku.com/$HEROKU_APP_NAME/web")
           printf 'BLACK_X_WEB_CONFIG=%s\n' "$config" >> "$GITHUB_ENV"
       - name: Push and release to Heroku
         shell: bash

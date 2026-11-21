@@ -19,3 +19,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Validate the Heroku web image on the hosted runner
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          config=$(bash .github/scripts/build-heroku-web.sh black-x-ci/web)
+          if ! [[ "$config" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo '::error::The built web image did not yield a valid config digest.'
+            exit 1
+          fi
