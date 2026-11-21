@@ -79,6 +79,7 @@ export async function respondParty(store, { id, channelId, messageId, userId, ac
     if (action === 'confirm') {
       if (!party.capacity) throw missing();
       if (rsvp) return 'مقعدك متأكد بالفعل.';
+      if (!state.admin?.enabled || state.admin.paused.events) throw new AppError('ADMIN_PAUSED', 'الحجوزات الجديدة متوقفة مؤقتًا.', 409);
       if (party.waitlist[0] !== userId || Object.keys(party.rsvps).length >= party.capacity) {
         throw new AppError('PARTY_WAITLIST', 'لسه مفيش مقعد متاح لدورك. تابع ترتيبك من /my.', 409);
       }
@@ -120,4 +121,4 @@ export async function respondParty(store, { id, channelId, messageId, userId, ac
     }
     return 'التذكير شغّال للحفلة دي. فعّل استقبال الرسائل الخاصة من السيرفر عشان يوصلك.';
   });
-}
+            }

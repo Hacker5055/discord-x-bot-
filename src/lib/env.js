@@ -38,7 +38,11 @@ export function readConfig(env = process.env) {
   const botToken = env.DISCORD_BOT_TOKEN?.trim();
   const apiSecret = env.BOT_API_SECRET;
   if (!botToken || /[^!-~]/.test(botToken)) throw invalid('DISCORD_BOT_TOKEN');
-  if (!apiSecret || /[^!-~]|,/.test(apiSecret)) throw invalid('BOT_API_SECRET');
+  // Accept 32-byte base64url (43+ characters) or hex (64 characters) secrets.
+  // Length is a guardrail, not proof of randomness. Generate this independently.
+  if (typeof apiSecret !== 'string' || !/^[A-Za-z0-9_-]{43,128}$/.test(apiSecret)
+    || apiSecret === botToken || new Set(apiSecret).size < 8
+    || /^(?:change[-_]?me|replace[-_]?me|your[-_]|example[-_])/i.test(apiSecret)) throw invalid('BOT_API_SECRET');
   const guildId = readId(env.DISCORD_GUILD_ID?.trim() || env.ALLOWED_GUILD_ID?.trim(), 'DISCORD_GUILD_ID');
   if (env.ALLOWED_GUILD_ID?.trim() && env.ALLOWED_GUILD_ID.trim() !== guildId) throw invalid('ALLOWED_GUILD_ID');
   const ownerId = readId(env.BX_OWNER_DISCORD_ID?.trim(), 'BX_OWNER_DISCORD_ID');
