@@ -46,8 +46,15 @@ jobs:
       - name: Build the web image (Linux AMD64)
         shell: bash
         run: |
+          set -euo pipefail
+          metadata="$RUNNER_TEMP/black-x-web-build.json"
           docker buildx build --platform linux/amd64 --load --provenance=false --sbom=false \
-            --tag "registry.heroku.com/$HEROKU_APP_NAME/web" .
+            --metadata-file "$metadata" --tag "registry.heroku.com/$HEROKU_APP_NAME/web" .
+          if ! config=$(jq -er '."containerimage.config.digest" | strings | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata"); then
+            echo '::error::The single-platform build did not return a valid image configuration digest.'
+            exit 1
+          fi
+          printf 'BLACK_X_WEB_CONFIG=%s\n' "$config" >> "$GITHUB_ENV"
       - name: Push and release to Heroku
         shell: bash
         env:
@@ -71,18 +78,38 @@ jobs:
             exit 1
           fi
 
+          if ! [[ "${BLACK_X_WEB_CONFIG:-}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo '::error::No verified image configuration digest from the build. Nothing was uploaded.'
+            exit 1
+          fi
+
           export DOCKER_CONFIG="$(mktemp -d "${RUNNER_TEMP}/black-x-docker.XXXXXX")"
           trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
           printf '%s\n' "$HEROKU_API_KEY" | docker login --username=_ --password-stdin registry.heroku.com
           image="registry.heroku.com/$HEROKU_APP_NAME/web"
-          docker push "$image"
+          # Force a single manifest even when the runner's Docker store uses an image index.
+          docker push --platform linux/amd64 "$image"
 
-          # The formation endpoint expects the image configuration ID, not the manifest digest.
-          image_id=$(docker image inspect --format '{{.Id}}' "$image")
-          if ! [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo '::error::Unable to resolve the pushed Docker image ID.'
+          # Like Heroku's CLI, use the registry's config.digest. Docker inspect .Id can be the
+          # manifest or index digest with a containerd image store, which formation cannot release.
+          manifest="$DOCKER_CONFIG/web-manifest.json"
+          registry_auth() {
+            printf 'Authorization: Basic '
+            printf ':%s' "$HEROKU_API_KEY" | base64 -w 0
+            printf '\n'
+          }
+          if ! registry_auth | curl --disable --silent --show-error --fail --proto '=https' --max-time 60 --header @- \
+            --header 'Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
+            --output "$manifest" "https://registry.heroku.com/v2/$HEROKU_APP_NAME/web/manifests/latest"; then
+            echo '::error::Could not verify the uploaded web manifest. No release was requested.'
             exit 1
           fi
+          if ! image_id=$(jq -er 'select(.schemaVersion == 2) | .config.digest | strings | select(test("^sha256:[0-9a-f]{64}$"))' "$manifest" 2>/dev/null) \
+            || [[ "$image_id" != "$BLACK_X_WEB_CONFIG" ]]; then
+            echo '::error::The registry web config does not match the image built in this run. No release was requested.'
+            exit 1
+          fi
+          echo "Verified uploaded web image configuration: $image_id"
           payload=$(jq -cn --arg image "$image_id" '{updates: [{type: "web", docker_image: $image}]}')
           release_response="$DOCKER_CONFIG/release-response.json"
           if ! status=$(heroku_api --request PATCH \
@@ -99,7 +126,10 @@ jobs:
             error_id=$(jq -er '.id | select(. == "not_found" or . == "unauthorized" or . == "forbidden" or
               . == "invalid_params" or . == "unprocessable_entity" or . == "rate_limit")' \
               "$release_response" 2>/dev/null) || error_id=unknown
-            printf '::error::Heroku rejected the web release (HTTP %s, %s). Check app Activity and deploy access.\n' "$status" "$error_id"
+            resource=$(jq -er '.resource | select(. == "docker_image" or . == "formation" or . == "app")' \
+              "$release_response" 2>/dev/null) || resource=unknown
+            printf '::error::Heroku rejected the web release (HTTP %s, %s, resource: %s). Check app Activity and deploy access.\n' \
+              "$status" "$error_id" "$resource"
             exit 1
           fi
           echo "Heroku accepted the web release for $GITHUB_SHA. Check dyno logs for gateway_ready."

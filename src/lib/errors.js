@@ -18,6 +18,9 @@ export class DiscordApiError extends Error {
   }
 }
 
+// These Discord responses confirm that a guarded create did not succeed. Transport failures and 5xx do not.
+export const rejectedWrite = (error) => error instanceof DiscordApiError && [400, 401, 403, 404, 429].includes(error.status);
+
 export const ownerRequired = () => new AppError('OWNER_REQUIRED', 'الأمر متاح فقط لمالك السيرفر المطابق لـ BX_OWNER_DISCORD_ID.', 403);
 
 const HIERARCHY_HELP = 'ارفع أعلى رول للبوت فوق رولات BLACK X من Server Settings → Roles.';

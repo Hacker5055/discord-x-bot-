@@ -4,7 +4,7 @@ import { SITE_ORIGIN } from '../community/anime.js';
 import { button, linkButton, row } from '../community/ui.js';
 import { hasPermission } from '../discord/permissions.js';
 import { isSnowflake } from '../lib/catalog.js';
-import { AppError, DiscordApiError, errorFields } from '../lib/errors.js';
+import { AppError, DiscordApiError, errorFields, rejectedWrite } from '../lib/errors.js';
 import { assertBridge, bridgeEnabled, siteSession } from '../site/session.js';
 import { checkTicketCategory, TICKET_ACCESS, TICKET_BOT } from './channel-plan.js';
 import { adminOf, audit, card, denied, fixedChoice, idOf, isMissing, live, memberRef, nonce, notFound, onboardingRoleName, post, roomRef, stale, TEXT_ROOMS } from './core.js';
@@ -12,6 +12,7 @@ import { COMPLAINT_CARD, complaintActions, complaintScope, queueComplaint } from
 import { detailLines, duplicate, kindAt, setRecord, stages } from './records.js';
 
 const TICKET_MARK = 'bx-ticket:';
+const PANEL_TITLE = '🎫 مركز دعم BLACK X';
 const MAX_SHARED_PER_TICKET = 40;
 const MAX_SHARED_BYTES = 384 * 1024;
 const overwrite = (id, type, allow, deny = 0n) => ({ id, type, allow: String(allow), deny: String(deny) });
@@ -382,10 +383,10 @@ export function ticketActions(c) {
   const deliveryLines = (message) => [message.delivery === 'sent' ? 'اترسل الرد في روم التذكرة واتشارك في الموقع.' :
     'الرد محفوظ كمشترك، لكن وصوله لديسكورد غير مؤكّد. راجع روم التذكرة قبل إعادة الإرسال.'];
 
-  async function publishPanel(i, roomId, version) {
+  async function publishPanel(i, roomId, version, { message_id, retry_unconfirmed } = {}) {
     return c.serial('ticket-panel', async () => {
       const s = await c.session(i, { team: 'support', module: 'tickets', types: TEXT_ROOMS,
-        ...(roomId ? { roomId, ownerOnly: true } : {}) });
+        ...(roomId ? { roomId } : {}), ownerOnly: Boolean(roomId || message_id || retry_unconfirmed) });
       if (version !== undefined && s.a.version !== version) throw stale();
       if (s.channel.id !== s.a.rooms.ticket_panel || !s.a.rooms.ticket_category || !s.a.teams.support?.roleId) throw denied();
       openSettings(c, s);
@@ -395,7 +396,7 @@ export function ticketActions(c) {
       const text = 'اختار المسار المناسب. هتتفتح لك تذكرة خاصة لفريق الدعم المخوّل؛ اكتب التفاصيل هناك، مش في روم عام.\n' +
         '**تذكرة واحدة مفتوحة لكل عضو.** لو عندك واحدة، كمّل فيها.' +
         (bridged ? '\nتقدر تتابعها من حسابك المربوط؛ الشات العادي مش بيتنقل للموقع.' : '');
-      const embed = { ...card('🎫 مركز دعم BLACK X', text).embeds[0], fields: [
+      const embed = { ...card(PANEL_TITLE, text).embeds[0], fields: [
         { name: '🛠️ مشكلة في الموقع', value: 'لو حاجة مش شغّالة في صفحة أو حساب أو حلقة.' },
         { name: complaint ? '📝 قدّم شكوى' : '📝 بلاغ', value: complaint
           ? 'اكتب في النموذج الخاص. البوت يحاول يوصل نصه للمالك على الخاص ورابط التذكرة لفريق الدعم.'
@@ -404,19 +405,58 @@ export function ticketActions(c) {
       const payload = post({ embeds: [embed], components: [row(button('bx:x:ticket:site', 'مشكلة في الموقع', 1),
         complaint ? button('bx:x:complaint:open', 'قدّم شكوى', 2) : button('bx:x:ticket:report', 'بلاغ', 2),
         ...(bridged ? [linkButton(`${SITE_ORIGIN}/profile`, 'تذاكري على الموقع')] : []))] }, i.id);
+      const channelId = s.channel.id;
       const existing = s.a.panels.ticket;
+      const pending = s.a.panels.ticketPending;
+      const recovering = message_id && idOf(message_id);
+      const edit = (id) => c.api.editMessage(channelId, id, post({ embeds: payload.embeds, components: payload.components }), { guarded: true });
       let messageId;
+      let attemptId;
       await c.assertCurrent(s);
-      if (existing?.channelId === s.channel.id) {
+      if (existing?.channelId === channelId) {
         try {
-          await c.api.editMessage(s.channel.id, existing.messageId, post({ embeds: payload.embeds, components: payload.components }));
+          if (recovering && recovering !== existing.messageId) {
+            await c.api.getMessage(channelId, existing.messageId);
+            throw new AppError('TICKET_PANEL_TRACKED', 'فيه لوحة مسجّلة وموجودة أصلًا في الروم. استخدم /ticket panel عشان تحدّثها.');
+          }
+          await edit(existing.messageId);
           messageId = existing.messageId;
         } catch (error) { if (!isMissing(error) || error.discordCode !== 10008) throw error; }
       }
-      if (!messageId) messageId = idOf((await c.api.createMessage(s.channel.id, payload, { guarded: true }))?.id);
+      if (!messageId && recovering) {
+        const message = await c.api.getMessage(channelId, recovering);
+        const buttons = message?.components?.flatMap((row) => row.components ?? []).map(({ custom_id }) => custom_id) ?? [];
+        if (message?.id !== recovering || message.channel_id !== channelId || message.author?.id !== c.botId ||
+          message.embeds?.[0]?.title !== PANEL_TITLE || !buttons.includes('bx:x:ticket:site') ||
+          !buttons.some((id) => ['bx:x:ticket:report', 'bx:x:complaint:open'].includes(id))) {
+          throw new AppError('TICKET_PANEL_MESSAGE', 'اختار معرّف لوحة الدعم القديمة اللي البوت نشرها في نفس الروم.');
+        }
+        await c.assertCurrent(s);
+        await edit(recovering);
+        messageId = recovering;
+      }
+      if (!messageId) {
+        if (pending?.channelId === channelId && !retry_unconfirmed) throw new AppError('TICKET_PANEL_UNCONFIRMED',
+          'نشر اللوحة السابق مش مؤكّد. راجع الروم: لو لقيتها استخدم /ticket panel message_id:معرّفها؛ لو اتأكدت إنها مش موجودة استخدم /ticket panel retry_unconfirmed:true.');
+        attemptId = idOf(i.id);
+        const unchanged = (a) => a.panels.ticketPending?.attemptId === pending?.attemptId && a.panels.ticketPending?.channelId === pending?.channelId;
+        await c.edit((a) => {
+          if (!unchanged(a)) throw stale();
+          a.panels.ticketPending = { channelId, attemptId };
+        }, s);
+        try { messageId = idOf((await c.api.createMessage(channelId, payload, { guarded: true }))?.id); }
+        catch (error) {
+          if (rejectedWrite(error)) await c.edit((a) => {
+            if (a.panels.ticketPending?.attemptId === attemptId) delete a.panels.ticketPending;
+          });
+          throw error;
+        }
+      }
       await c.edit((a) => {
-        a.panels.ticket = { channelId: s.channel.id, messageId };
-        audit(a, 'support', 'ticket_panel_published', s.by, s.channel.id, c.now());
+        if (attemptId && a.panels.ticketPending?.attemptId !== attemptId) throw stale();
+        a.panels.ticket = { channelId, messageId };
+        if (a.panels.ticketPending?.channelId === channelId) delete a.panels.ticketPending;
+        audit(a, 'support', 'ticket_panel_published', s.by, channelId, c.now());
       }, s);
       return [`لوحة الدعم اتنشرت في ${roomRef(s.channel.id)}.`];
     });
@@ -424,7 +464,7 @@ export function ticketActions(c) {
 
   return {
     open: (i, { type }) => discordOpen(i, type), fromCard: (i, type) => discordOpen(i, type, true),
-    panel: (i) => publishPanel(i), publishForOwner: publishPanel, complaints,
+    panel: (i, options) => publishPanel(i, undefined, undefined, options), publishForOwner: publishPanel, complaints,
     complaintForm(i) {
       c.assertGuild(i);
       const id = idOf(i.message?.id);
