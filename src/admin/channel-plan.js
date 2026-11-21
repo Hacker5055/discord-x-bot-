@@ -168,7 +168,9 @@ export function planChannels(c, w, a, specs) {
 export function observedChange(c, channels, change, expected) {
   const [id] = change.shape;
   const ch = channels.find((ch) => ch.id === id);
-  if (!ch || ch.guild_id && ch.guild_id !== c.guildId || !equal(roomShape(ch), change.shape) || !equal(acl(ch), expected)) return false;
+  // PostgreSQL JSONB may reorder overwrite object keys in a saved undo journal.
+  const target = acl({ permission_overwrites: expected });
+  if (!ch || ch.guild_id && ch.guild_id !== c.guildId || !equal(roomShape(ch), change.shape) || !equal(acl(ch), target)) return false;
   if (!equal(syncedChildren(channels, ch), change.children.map(([key]) => key))) return false;
-  return change.children.every((shape) => channels.some((child) => equal(roomShape(child), shape) && equal(acl(child), expected)));
+  return change.children.every((shape) => channels.some((child) => equal(roomShape(child), shape) && equal(acl(child), target)));
 }

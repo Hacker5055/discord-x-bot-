@@ -105,13 +105,13 @@ export class DiscordApi {
       roles, pending, communication_disabled_until }));
   }
   getRoles(guildId) { return this.#request('GET', `/guilds/${guildId}/roles`); }
-  createRole(guildId, data, recover) { return this.#request('POST', `/guilds/${guildId}/roles`, data, recover); }
+  createRole(guildId, data, recover, options) { return this.#request('POST', `/guilds/${guildId}/roles`, data, recover, options); }
   updateRole(guildId, roleId, data) { return this.#request('PATCH', `/guilds/${guildId}/roles/${roleId}`, data); }
   reorderRoles(guildId, positions) { return this.#request('PATCH', `/guilds/${guildId}/roles`, positions); }
   grantRole(guildId, userId, roleId) { return this.#request('PUT', `/guilds/${guildId}/members/${userId}/roles/${roleId}`); }
   revokeRole(guildId, userId, roleId) { return this.#request('DELETE', `/guilds/${guildId}/members/${userId}/roles/${roleId}`); }
   getChannels(guildId) { return this.#request('GET', `/guilds/${guildId}/channels`); }
-  createChannel(guildId, data, recover) { return this.#request('POST', `/guilds/${guildId}/channels`, data, recover); }
+  createChannel(guildId, data, recover, options) { return this.#request('POST', `/guilds/${guildId}/channels`, data, recover, options); }
   getChannel(channelId) { return this.#request('GET', `/channels/${channelId}`); }
   updateChannel(channelId, data, options) { return this.#request('PATCH', `/channels/${channelId}`, data, undefined, options); }
   deleteChannel(channelId) { return this.#request('DELETE', `/channels/${channelId}`, undefined, undefined, { guarded: true }); }

@@ -108,3 +108,16 @@ test('guarded Discord writes include a narrow audit reason and never replay a po
   assert.equal(limited.calls.length, 1);
   assert.deepEqual(limited.waits, []);
 });
+
+test('guarded setup role and channel creates do not replay a POST after an ambiguous result', async () => {
+  const opts = { guarded: true, reason: 'BLACK X approved support setup' };
+  for (const [operation, suffix] of [['createRole', 'roles'], ['createChannel', 'channels']]) {
+    const { api, calls, waits } = stub(jsonResponse(502, {}));
+    await assert.rejects(api[operation](GUILD_ID, { name: 'BLACK X Support' }, undefined, opts), { status: 502 });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, `https://discord.com/api/v10/guilds/${GUILD_ID}/${suffix}`);
+    assert.equal(calls[0].options.method, 'POST');
+    assert.equal(calls[0].options.headers['x-audit-log-reason'], 'BLACK%20X%20approved%20support%20setup');
+    assert.deepEqual(waits, []);
+  }
+});

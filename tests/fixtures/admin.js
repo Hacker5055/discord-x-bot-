@@ -6,7 +6,7 @@ import { createAnimeService, SITE_ORIGIN } from '../../src/community/anime.js';
 import { createMemoryStore } from '../../src/community/store.js';
 import { readConfig } from '../../src/lib/env.js';
 import { createLogger } from '../../src/lib/log.js';
-import { provisionGuild } from '../../src/provisioning.js';
+import { createProvisioner, provisionGuild } from '../../src/provisioning.js';
 import { createRoleService } from '../../src/roles/sync.js';
 import { BOT_ID, BOT_ROLE_ID, GUILD_ID, MOD_ID, MemoryDiscord, OWNER_ID, fixtureEnv } from './discord.js';
 
@@ -30,7 +30,8 @@ export async function adminFixture({ voice = false, automod = false, setup = fal
   const anime = createAnimeService({ store, secrets: [config.botToken, config.apiSecret, config.siteBridgeSecret], now });
   const restart = () => createAdministration({ ...context, roles, catalogMonitor });
   const admin = restart();
-  const invoke = createInteractionHandler({ ...context, roles, admin, community: { store, anime, now } });
+  const runSetup = createProvisioner(context);
+  const invoke = createInteractionHandler({ ...context, roles, admin, runSetup, community: { store, anime, now } });
   const everyone = api.roles[0];
   everyone.permissions = String(P.ViewChannel | P.SendMessages | P.ReadMessageHistory | P.Connect | P.UseApplicationCommands);
   const botRole = api.roles.find((r) => r.id === BOT_ROLE_ID);
@@ -50,7 +51,9 @@ export async function adminFixture({ voice = false, automod = false, setup = fal
     const replies = [];
     const value = (k) => fields[k] ?? null;
     return {
-      replies, id: api.nextId(), guildId, user: { id: by, bot: by === BOT_ID }, guild: { ownerId }, channelId: channel?.id,
+      replies, id: api.nextId(), guildId, user: { id: by, bot: by === BOT_ID }, guild: { ownerId, channels: { get cache() {
+        return new Map(api.channels.map(({ id, type, parent_id }) => [id, { id, type, parentId: parent_id }]));
+      } } }, channelId: channel?.id,
       channel: { guildId, type: channel?.type, id: channel?.id }, appPermissions: new PermissionsBitField(BigInt(botRole.permissions)),
       memberPermissions: new PermissionsBitField(by === OWNER_ID ? P.ManageGuild : 0n),
       isChatInputCommand: () => !customId, isButton: () => Boolean(customId) && !modal, isModalSubmit: () => modal, customId, message: messageId && { id: messageId },

@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto';
 import { ChannelType as C } from 'discord.js';
 import { button, row } from '../community/ui.js';
 import { resolveRooms } from '../discord/state.js';
-import { AppError, describeError, DiscordApiError, ownerRequired } from '../lib/errors.js';
+import { AppError, describeError, DiscordApiError, errorFields, ownerRequired } from '../lib/errors.js';
 import { adminOf, audit, card, fixedChoice, idOf, roomRef, stale, TEXT_ROOMS } from './core.js';
 import { checkAclWrite, checkProfile, equal, observedChange, planChannels, PROFILES, roomError, SETUP_TYPES, setupRole, syncedChildren } from './channel-plan.js';
 import { rulesRoom } from './rules.js';
+import { approvedSetupChanges, checkHiddenChildren, describeSupportSetup, hiddenChannelShapes,
+  materializeSupportSetup, planSupportSetup } from './support-setup.js';
 
 const TTL = 5 * 60_000;
 const openTickets = (a) => Object.values(a.requests).some((r) => r.kind === 'ticket' && !r.closedAt);
@@ -32,7 +34,7 @@ function supportRoom(c, w, refs, key, id) {
   }
 }
 
-function supportPlan(c, { by, w, a }, refs) {
+function supportPlan(c, { by, w, a, hidden }, refs) {
   const prior = a.teams.support;
   const panelId = refs.panel ?? a.rooms.ticket_panel ?? resolveRooms(w.channels, c.config).rooms.support?.id;
   const categoryId = refs.category ?? a.rooms.ticket_category;
@@ -47,6 +49,7 @@ function supportPlan(c, { by, w, a }, refs) {
   const panel = supportRoom(c, w, refs, 'panel', panelId);
   const category = supportRoom(c, w, refs, 'category', categoryId);
   const staffRoom = supportRoom(c, w, refs, 'staff', staffId);
+  checkHiddenChildren(hidden, categoryId);
   if (panelId === staffId || panel.parent_id === categoryId || staffRoom.parent_id === categoryId) {
     throw roomError(category, 'لوحة الأعضاء وروم الفريق لازم يكونوا منفصلين وخارج كاتيجوري التذاكر.');
   }
@@ -79,23 +82,25 @@ async function assertStaffRolesNotSelectable(c, w, specs) {
   }
 }
 
-async function draft(c, ctx, refs) {
+async function draft(c, ctx, refs, { supportOnly = false } = {}) {
   const { a, w } = ctx;
   const support = supportPlan(c, ctx, refs);
-  const specs = { ...a.server?.profiles };
+  const profiles = a.server?.profiles ?? {};
+  const specs = supportOnly ? {} : { ...profiles };
   for (const [id, spec] of Object.entries(specialSpecs(support))) {
-    if (specs[id] && !(spec.profile === 'ticket_panel' && specs[id].profile === 'read_only') &&
-      !(spec.profile === 'support_staff' && specs[id].profile === 'staff' && specs[id].roleId === spec.roleId)) {
+    const saved = profiles[id];
+    if (saved && !(spec.profile === 'ticket_panel' && saved.profile === 'read_only') &&
+      !(spec.profile === 'support_staff' && saved.profile === 'staff' && saved.roleId === spec.roleId)) {
       throw roomError(c.findRoom(w, id), 'له غرض تاني مسجّل. شيل الربط القديم بـ /server unbind قبل تجهيز الدعم.');
     }
     specs[id] = spec;
   }
   const changes = planChannels(c, w, a, specs);
   await assertStaffRolesNotSelectable(c, w, specs);
-  return { version: a.version, changes, specs, support, rulesId: rulesRoom(a), paused: Boolean(a.paused.tickets) };
+  return { version: a.version, changes, specs, support, rulesId: supportOnly ? undefined : rulesRoom(a), paused: Boolean(a.paused.tickets) };
 }
 
-function undoPlan(c, { by, w, a }) {
+function undoPlan(c, { by, w, a, hidden }) {
   const backup = a.server?.undo;
   if (!backup || backup.ownerId !== by || !backup.attempted.length) {
     throw new AppError('SERVER_UNDO_EMPTY', 'مفيش تعديل أذونات محفوظ للتراجع عنه.');
@@ -103,6 +108,7 @@ function undoPlan(c, { by, w, a }) {
   const changes = [];
   for (const id of [...backup.attempted].reverse()) {
     const entry = backup.changes.find(({ shape }) => shape[0] === id);
+    if (entry.profile === 'ticket_category') checkHiddenChildren(hidden, id);
     if (observedChange(c, w.channels, entry, entry.before)) continue; // Already rolled back or never accepted.
     if (!observedChange(c, w.channels, entry, entry.after)) {
       throw roomError(c.findRoom(w, id), 'الأذونات أو مزامنة الرومات اتغيّرت بعد التجهيز. مش هنستبدل تعديل أحدث.', 'ADMIN_STALE');
@@ -114,33 +120,43 @@ function undoPlan(c, { by, w, a }) {
   return { version: a.version, backupId: backup.id, changes, pauseSupport: backup.attempted.some((id) => supportIds.includes(id)) };
 }
 
-function preview(ctx, plan, mode, canList, specs = {}) {
+function preview(ctx, plan, mode, canList, observed) {
+  const specs = plan.specs ?? {};
   const included = new Set(Object.keys(specs));
   for (const ch of ctx.w.channels) if (included.has(ch.id) && ch.type === C.GuildCategory) {
     for (const id of syncedChildren(ctx.w.channels, ch)) included.add(id);
   }
   const skipped = ctx.w.channels.filter((ch) => SETUP_TYPES.includes(ch.type) && !included.has(ch.id) && !(ch.topic ?? '').startsWith('bx-ticket:'));
-  const rows = plan.changes.map(({ shape: [id], profile, children }) => `• ${roomRef(id)} — ${labels[profile]}${specs[id]?.roleId ? ` · <@&${specs[id].roleId}>` : ''}${children.length ? ` · ومعاه ${children.length} متزامنين` : ''}`);
+  const rows = plan.changes.map(({ shape: [id], profile, children }) => {
+    const roleId = specs[id]?.roleId;
+    const role = roleId === 'new:role' ? 'رول الدعم الجديد' : roleId && `<@&${roleId}>`;
+    return `• ${roomRef(id)} — ${labels[profile]}${role ? ` · ${role}` : ''}${children.length ? ` · ومعاه ${children.length} متزامنين` : ''}`;
+  });
   const m = plan.support;
   const details = mode === 'undo' ? [
     'ده بيرجّع أذونات آخر تطبيق فقط، مش إعدادات البوت أو رسائل القوانين واللوحة. بعض الرومات ممكن ترجع لجمهورها السابق.',
     ...(plan.pauseSupport ? ['فتح التذاكر الجديدة والتنبيهات هيتوقفوا قبل استرجاع أذونات الدعم. التذاكر الحالية هتفضل موجودة.'] : []),
   ] : [
-    ...(m ? [`الدعم: اللوحة ${roomRef(m.panelId)} · الكاتيجوري ${roomRef(m.categoryId)} · أوامر الدعم في ${roomRef(m.staffId)} لرول <@&${m.roleId}>.`,
+    ...(m ? [...(observed ? describeSupportSetup(observed) : [`الدعم: اللوحة ${roomRef(m.panelId)} · الكاتيجوري ${roomRef(m.categoryId)} · أوامر الدعم في ${roomRef(m.staffId)} لرول <@&${m.roleId}>.`]),
       'روم الفريق ده هيبقى نطاق أوامر الدعم وربط موظفي الدعم بالموقع. المالك يستلم نص النموذج على الخاص؛ رول الدعم يستلم رابط التذكرة الخاصة، من غير نسخ النص.',
       ...(!ctx.a.enabled ? ['أدوات الإدارة هتتفعّل عشان اللوحة تشتغل.'] : []),
       ...(plan.paused ? ['⚠ فتح التذاكر متوقف بقرار المالك. التجهيز مش هيلغي الإيقاف.'] : []),
       ...(canList === false ? ['⚠ Discord رفض قراءة أعضاء الرول. فعّل Server Members Intent من Developer Portal لتنبيهات الفريق على الخاص؛ المالك وصندوق الفريق مش محتاجين قراءة القائمة.'] : []),
     ] : ['الدعم مش مكتمل. اختار panel/category/staff/role عشان تجهزه.']),
-    ...(plan.rulesId ? [`القوانين هتتنشر أو تتحدّث في ${roomRef(plan.rulesId)}.`] : ['القوانين لسه من غير روم مرتبط: `/server bind profile:rules`.']),
-    `الرومات خارج الخطة (${skipped.length}) تفضل زي ما هي${skipped.length ? `: ${skipped.slice(0, 5).map(({ id }) => roomRef(id)).join('، ')}` : '.'} استخدم /server bind للرومات الثابتة اللي عايز تجهّزها.`,
+    ...(observed ? [
+      'لو فيه مورد دعم باسم مختلف، اختاره صراحةً في /server prepare قبل الموافقة. راجع مين معاه رول الدعم؛ البوت مش هيوزّعه.',
+      'اللوحة عامة للقراءة. أوامر فريق الدعم هتتحصر في روم الفريق الخاص. التجهيز مش بيغيّر الويب هوكات أو رولات الموقع أو القوانين.',
+    ] : [
+      ...(plan.rulesId ? [`القوانين هتتنشر أو تتحدّث في ${roomRef(plan.rulesId)}.`] : ['القوانين لسه من غير روم مرتبط: `/server bind profile:rules`.']),
+      `الرومات خارج الخطة (${skipped.length}) تفضل زي ما هي${skipped.length ? `: ${skipped.slice(0, 5).map(({ id }) => roomRef(id)).join('، ')}` : '.'} استخدم /server bind للرومات الثابتة اللي عايز تجهّزها.`,
+    ]),
     'هنعدّل الأذونات اللي تخص الغرض ده بس. مالك السيرفر واللي معاهم Administrator بيتجاوزوا الأذونات بطبيعة Discord.',
   ];
   const report = plan.changes.flatMap(({ shape: [id], children, profile, before, after }) =>
     [`#${id} · ${labels[profile]}`, `رومات متزامنة: ${children.map(([key]) => key).join(', ') || 'لا يوجد'}`,
       `قبل: ${JSON.stringify(before)}`, `بعد: ${JSON.stringify(after)}`, '']).join('\n');
-  return { ...card(mode === 'undo' ? 'معاينة التراجع' : 'معاينة تجهيز BLACK X',
-    [`${rows.length} تعديل أذونات. مفيش كتابة في المعاينة. الـ **Allow/Deny** ومعرّفات كل روم في ملف الخطة.`, ...details,
+  return { ...card(mode === 'undo' ? 'معاينة التراجع' : observed ? 'معاينة إعداد دعم BLACK X' : 'معاينة تجهيز BLACK X',
+    [`${rows.length} تعديل أذونات. مفيش كتابة في المعاينة.${rows.length ? ' أذونات قبل/بعد في ملف الخطة.' : ''}`, ...details,
       ...rows.slice(0, 18), ...(rows.length > 18 ? ['باقي الرومات في الملف.'] : [])].join('\n')), ...(rows.length ? {
     files: [{ attachment: Buffer.from(report), name: 'black-x-permissions.txt' }],
   } : {}) };
@@ -153,31 +169,45 @@ export function serverActions(c, { ticket, rules }) {
     const by = await c.owner(i);
     const [w, state] = await Promise.all([c.world(), c.read()]);
     if (w.guild.owner_id !== by) throw ownerRequired();
-    return { by, w, a: adminOf(state) };
+    return { by, w, a: adminOf(state), hidden: hiddenChannelShapes(i, w.channels) };
   }
 
-  async function createOffer(i, mode, fields = {}) {
+  async function reviewed(ctx, mode, refs) {
+    if (mode === 'undo') return { plan: undoPlan(c, ctx) };
+    if (mode !== 'setup') return { plan: await draft(c, ctx, refs) };
+    const { observed, refs: selected, virtual } = planSupportSetup(c, ctx);
+    return { observed, plan: await draft(c, virtual, selected, { supportOnly: true }) };
+  }
+
+  async function createOffer(i, mode, fields = {}, { dryRun = false } = {}) {
     const ctx = await snapshot(i);
     const refs = Object.fromEntries(['panel', 'category', 'staff', 'role'].filter((key) => fields[key]).map((key) => [key, idOf(fields[key].id)]));
-    const plan = mode === 'undo' ? undoPlan(c, ctx) : await draft(c, ctx, refs);
+    const review = await reviewed(ctx, mode, refs);
+    const { plan, observed } = review;
     let canList;
     if (plan.support) {
       try { await c.api.listGuildMembers(c.guildId, { limit: 1 }); }
       catch (error) { if (intentForbidden(error)) canList = false; else throw error; }
     }
-    const result = preview(ctx, plan, mode, canList, plan.specs);
-    if (mode !== 'undo' && !plan.changes.length && !plan.support && !plan.rulesId) return result;
+    const result = preview(ctx, plan, mode, canList, observed);
+    if (dryRun || (mode !== 'undo' && !plan.changes.length && !plan.support && !plan.rulesId)) return result;
     for (const [id, value] of offers) if (value.expires <= c.now() || offers.size >= 8) offers.delete(id);
     const id = idOf(i.id);
-    offers.set(id, { mode, refs, by: ctx.by, channelId: i.channelId, expires: c.now() + TTL, hash: digest(plan) });
-    return { ...result, components: [row(button(`bx:x:server:${id}`, mode === 'undo' ? 'تأكيد التراجع' : 'تطبيق التجهيز', mode === 'undo' ? 4 : 1))] };
+    offers.set(id, { mode, refs, by: ctx.by, channelId: i.channelId, expires: c.now() + TTL, hash: digest(review) });
+    return { ...result, components: [row(button(`bx:x:server:${id}`, mode === 'undo' ? 'تأكيد التراجع' : mode === 'setup' ? 'نفّذ إعداد الدعم' : 'تطبيق التجهيز', mode === 'undo' ? 4 : 1))] };
   }
 
-  async function writeChanges(plan, beforeWrite) {
+  async function writeChanges(i, plan, beforeWrite) {
     const applied = [];
     for (const change of plan.changes) {
       const [id, type] = change.shape;
-      const observe = async () => type === C.GuildCategory ? c.api.getChannels(c.guildId) : [await c.api.getChannel(id)];
+      const observe = async () => {
+        if (type !== C.GuildCategory) return [await c.api.getChannel(id)];
+        const channels = await c.api.getChannels(c.guildId);
+        // A newly synced hidden child must not be changed indirectly by a category PATCH.
+        if (change.profile === 'ticket_category') checkHiddenChildren(hiddenChannelShapes(i, channels), id);
+        return channels;
+      };
       try {
         if (!observedChange(c, await observe(), change, change.before)) throw stale();
         await beforeWrite(id);
@@ -228,16 +258,34 @@ export function serverActions(c, { ticket, rules }) {
       });
     },
     prepare(i, fields) { return serial(() => createOffer(i, 'prepare', fields)); },
+    setup(i, options) { return serial(() => createOffer(i, 'setup', {}, options)); },
     undo(i) { return serial(() => createOffer(i, 'undo')); },
     async confirm(i, id) {
       return serial(async () => {
-        const ctx = await snapshot(i);
+        let ctx = await snapshot(i);
         const offer = offers.get(id);
         if (!offer || offer.expires <= c.now() || offer.by !== ctx.by || offer.channelId !== i.channelId) throw stale();
-        const undo = offer.mode === 'undo';
-        const plan = undo ? undoPlan(c, ctx) : await draft(c, ctx, offer.refs);
         offers.delete(id);
-        if (digest(plan) !== offer.hash) throw stale();
+        const undo = offer.mode === 'undo';
+        const setup = offer.mode === 'setup';
+        const review = await reviewed(ctx, offer.mode, offer.refs);
+        if (digest(review) !== offer.hash) throw stale();
+        let { plan } = review;
+        const created = [];
+        if (setup) {
+          try {
+            const initial = plan;
+            const materialized = await materializeSupportSetup(c, () => snapshot(i), review, initial.version, id, created);
+            ctx = materialized.ctx;
+            plan = await draft(c, ctx, materialized.refs, { supportOnly: true });
+            if (!equal(plan.changes, approvedSetupChanges(initial.changes, plan.support.roleId))) throw stale();
+          } catch (error) {
+            c.log.warn('support_setup_interrupted', { created: created.length, ...errorFields(error) });
+            return [`إعداد الدعم وقف: ${describeError(error)}`,
+              ...(created.length ? [`الموارد اللي اتأكد إنشاؤها: ${created.join('، ')}.`] : []),
+              'ما اتطبّقش ربط جديد ولا اتنشرت لوحة. راجع الحالة وشغّل /setup للمعاينة من جديد.'];
+          }
+        }
         let version = plan.version;
         version = await c.edit((a) => {
           ensureVersion(a, plan.version);
@@ -249,12 +297,14 @@ export function serverActions(c, { ticket, rules }) {
           }
           return a.version;
         });
-        const result = await writeChanges(plan, (key) => c.edit((a) => {
+        const newlyCreated = created.length ? `الموارد اللي اتأكد إنشاؤها: ${created.join('، ')}.` : undefined;
+        const result = await writeChanges(i, plan, (key) => c.edit((a) => {
           ensureVersion(a, version);
           if (!undo) a.server.undo.attempted.push(key); // Journal before the REST write, including ambiguous responses.
         }));
         if (result.failed) return [`اتأكد ${result.applied.length} تعديل بس. التنفيذ وقف عند ${roomRef(result.failed)}: ${result.reason}`,
-          'راجع الحالة من جديد بـ /server prepare أو /server undo. مفيش نشر لوحات في الخطوة اللي وقفت.'];
+          ...(newlyCreated ? [newlyCreated] : []),
+          `راجع الحالة من جديد بـ ${setup ? '/setup أو ' : ''}/server prepare أو /server undo. مفيش نشر لوحات في الخطوة اللي وقفت.`];
         if (undo) {
           await c.edit((a) => {
             ensureVersion(a, version);
@@ -268,19 +318,32 @@ export function serverActions(c, { ticket, rules }) {
         try {
           const verified = await c.world();
           if (verified.guild.owner_id !== ctx.by || planChannels(c, verified, ctx.a, plan.specs).length) throw stale();
+          if (plan.support) {
+            const { roleId, categoryId, panelId, staffId } = plan.support;
+            const refs = { role: roleId, category: categoryId, panel: panelId, staff: staffId };
+            const live = { ...ctx, w: verified, hidden: hiddenChannelShapes(i, verified.channels) };
+            if (setup) {
+              const found = planSupportSetup(c, live).refs;
+              if (Object.entries(refs).some(([key, id]) => found[key] !== id)) throw stale();
+            }
+            supportPlan(c, live, refs);
+          }
           await assertStaffRolesNotSelectable(c, verified, plan.specs);
         } catch (error) {
           return [`تم تطبيق ${result.applied.length} تعديل، لكن تعذّر تأكيد الخطة النهائية. ${describeError(error)}`,
+            ...(newlyCreated ? [newlyCreated] : []),
             'ما اتغيّرش تفويض الدعم وما اتنشرتش اللوحات. اعمل معاينة جديدة أو تراجع.'];
         }
         version = await c.edit((a) => {
           ensureVersion(a, version);
           const support = plan.support;
           if (support) {
+            if (a.server?.supportSetup) delete a.server.supportSetup;
             if (openTickets(a) && (a.rooms.ticket_category !== support.categoryId || a.teams.support?.roleId !== support.roleId)) throw stale();
             const nextTeam = { roleId: support.roleId, rooms: [support.staffId] };
             const nextRooms = { ticket_panel: support.panelId, ticket_category: support.categoryId, site_staff: support.staffId };
-            if (!a.enabled || !equal(a.teams.support, nextTeam) || !equal(a.complaints, support) ||
+            if (!a.enabled || a.teams.support?.roleId !== nextTeam.roleId || !equal(a.teams.support?.rooms, nextTeam.rooms) ||
+              Object.entries(support).some(([key, value]) => a.complaints?.[key] !== value) ||
               Object.entries(nextRooms).some(([purpose, id]) => a.rooms[purpose] !== id)) {
               a.enabled = true;
               Object.assign(a.rooms, nextRooms);
@@ -289,10 +352,12 @@ export function serverActions(c, { ticket, rules }) {
               a.version += 1;
             }
           }
-          audit(a, 'ops', 'server_prepared', ctx.by, id, c.now());
+          audit(a, 'ops', setup ? 'support_setup_applied' : 'server_prepared', ctx.by, id, c.now());
           return a.version;
         });
-        const lines = [`اتأكد تعديل الأذونات في ${result.applied.length} روم أو كاتيجوري.`];
+        const lines = [...(setup ? [`الدعم اتجهّز: اللوحة ${roomRef(plan.support.panelId)}، التذاكر ${roomRef(plan.support.categoryId)}، الفريق ${roomRef(plan.support.staffId)} · <@&${plan.support.roleId}>.`,
+          created.length ? `اتعمل ${created.length} مورد ناقص. وزّع رول الدعم يدويًا على المخوّلين بس.` : 'استخدمت الموارد الموجودة؛ ما اتعملش أي روم أو رول جديد.'] : []),
+          `اتأكد تعديل الأذونات في ${result.applied.length} روم أو كاتيجوري.`];
         for (const [label, publish] of [
           ...(plan.rulesId ? [['القوانين', () => rules.publish(i, { version })]] : []),
           ...(plan.support && !plan.paused ? [['لوحة الدعم', () => ticket.publishForOwner(i, plan.support.panelId, version)]] : []),

@@ -52,7 +52,7 @@ test('bootstrap fetches the bot and registers all commands on the configured gui
     'admin', 'ticket', 'staff', 'mod', 'kb', 'incident', 'access', 'layout', 'room', 'guide', 'welcome', 'idea', 'content', 'discussion',
     'calendar', 'my', 'schedule', 'automod', 'server', 'rules',
   ]);
-  assert.equal(registration.commands[0].options[0].name, 'dry_run');
+  assert.deepEqual(registration.commands[0].options.map(({ name }) => name), ['dry_run', 'scope']);
   assert.deepEqual(registration.commands[2].options.map(({ name }) => name), ['grant', 'revoke']);
 });
 
@@ -86,7 +86,7 @@ test('/setup requires the configured, actual Discord owner and its permissions; 
     assert.equal(invocation.replies[0][1].flags, MessageFlags.Ephemeral);
   }
   assert.equal(api.operations.length, 0);
-  const request = interaction('setup', { permissions: PermissionFlagsBits.ManageGuild, options: { dry_run: true } });
+  const request = interaction('setup', { permissions: PermissionFlagsBits.ManageGuild, options: { scope: 'integrations', dry_run: true } });
   await handle(request);
   assert.match(contentOf(request), /لم أكتب أي تغيير/);
   assert.match(contentOf(request), /```dotenv\nDISCORD_GUILD_ID/);
@@ -189,7 +189,7 @@ test('health depends on both Gateway readiness and the availability of the one c
 test('a former owner cannot provision when the fresh Discord snapshot shows a transfer', async () => {
   const { api, handle } = fixture();
   api.getGuild = async () => ({ id: GUILD_ID, owner_id: MOD_ID });
-  const invocation = interaction('setup', { permissions: PermissionFlagsBits.ManageGuild });
+  const invocation = interaction('setup', { permissions: PermissionFlagsBits.ManageGuild, options: { scope: 'integrations' } });
   await handle(invocation);
   assert.match(contentOf(invocation), /BX_OWNER_DISCORD_ID/);
   assert.deepEqual(api.writes, []);

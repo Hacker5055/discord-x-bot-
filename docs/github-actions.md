@@ -27,7 +27,7 @@ heroku stack:set container --app "$APP_NAME"
 | `BX_OWNER_DISCORD_ID` | معرّف مالك السيرفر الفعلي. |
 | `BOT_API_SECRET` | سر منفصل مشترك مع خادم الموقع. |
 
-لا تضبط `PORT`: Heroku يعيّنه تلقائيًا، والبوت يستمع عليه. صورة Docker تستخدم Node.js 20 ولا تحتاج إلى Node.js buildpack. لا ترفع `.env` أو توكن Discord أو سر الموقع إلى GitHub. معرّفات `DISCORD_*` الاختيارية من `/setup` يمكن إضافتها لاحقًا في نفس **Config Vars**.
+لا تضبط `PORT`: Heroku يعيّنه تلقائيًا، والبوت يستمع عليه. صورة Docker تستخدم Node.js 20 ولا تحتاج إلى Node.js buildpack. لا ترفع `.env` أو توكن Discord أو سر الموقع إلى GitHub. معرّفات `DISCORD_*` الاختيارية من `/setup scope:integrations` يمكن إضافتها لاحقًا في نفس **Config Vars**.
 
 ## ٢. إعداد اعتماد النشر في GitHub
 
@@ -42,7 +42,7 @@ heroku stack:set container --app "$APP_NAME"
 
 1. بعد دمج الـPR في `main`، افتح **Actions → Deploy BLACK X to Heroku → Run workflow** واختر `main`. ممكن تكتب اسم التطبيق المقصود في `expected_app`؛ لو مش مطابق لإعداد بيئة النشر، الأمر بيقف قبل الرفع.
 2. بعد أول إصدار، من **Heroku Dashboard → Resources** اضبط **dyno واحد `web` على Basic أو Standard**. لا تحتاج `worker` لأن نفس العملية تشغّل Gateway وواجهة HTTP. `Eco` قد ينام عند عدم وجود نشاط HTTP، فلا تعتمد عليه لإبقاء البوت متصلًا. الخطط الدائمة مدفوعة؛ الـAction لا يغيّر خطة الحساب أو عدد الـdynos.
-3. تابع السجل وتحقق من `gateway_ready`، ثم جرّب `/status` داخل Discord. لتجهيز الدعم والرومات، استخدم المعاينة بـ`/server prepare`، مش إعادة `/setup`. نجاح الـAction يعني أن Heroku قبل طلب الإصدار، وليس أن الـGateway أصبح جاهزًا بعد.
+3. تابع السجل وتحقق من `gateway_ready`، ثم جرّب `/status` داخل Discord. لتجهيز الدعم، استخدم معاينة `/setup`؛ وللاختيار اليدوي أو أذونات باقي الرومات، استخدم `/server prepare`. نجاح الـAction يعني أن Heroku قبل طلب الإصدار، وليس أن الـGateway أصبح جاهزًا بعد.
 
 ```bash
 heroku ps --app "$APP_NAME"
