@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { ChannelType, PermissionFlagsBits as P, escapeMarkdown } from 'discord.js';
+import { ChannelType, PermissionFlagsBits as P, PermissionsBitField, escapeMarkdown } from 'discord.js';
 import { requireOwner } from '../commands/access.js';
 import { cleanText } from '../community/anime.js';
 import { requireStore } from '../community/store.js';
@@ -136,8 +136,11 @@ export function createAdminCore({ api, config, botId, store, roles, log, catalog
   };
   const botNeeds = (w, channel, ...flags) => {
     const effective = bits(w, channel, botId, w.botMember);
-    if (!flags.every((flag) => hasPermission(effective, flag))) {
-      throw new AppError('ADMIN_BOT_PERMISSION', 'صلاحيات البوت ناقصة في الروم أو الكاتيجوري ده.', 403);
+    const required = flags.reduce((bits, flag) => bits | flag, 0n);
+    if (!hasPermission(effective, required)) {
+      const missing = new PermissionsBitField(required & ~effective).toArray();
+      const where = channel ? `في ${roomRef(channel.id)}` : 'على مستوى السيرفر (رول البوت)';
+      throw new AppError('ADMIN_BOT_PERMISSION', `صلاحيات البوت الناقصة ${where}: ${missing.join('، ')}.`, 403);
     }
   };
   const postNeeds = (w, c) => botNeeds(w, c, P.ViewChannel, P.SendMessages, P.EmbedLinks);

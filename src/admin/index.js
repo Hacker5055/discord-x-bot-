@@ -15,6 +15,12 @@ import { ticketActions } from './tickets.js';
 import { trainingActions } from './training.js';
 import { welcomeActions } from './welcome.js';
 
+const CASE_BUTTON = /^bx:x:case:(claim|reply|close):([0-9]{17,20})$/;
+const COMPLAINT_MODAL = /^bx:x:complaint:([0-9]{17,20})$/;
+const opensStaffForm = (customId) => /^(reply|close)$/.test(CASE_BUTTON.exec(customId)?.[1] ?? '');
+export const opensAdminForm = (customId) => customId === 'bx:x:complaint:open' || opensStaffForm(customId);
+export const submitsAdminForm = (customId) => COMPLAINT_MODAL.test(customId) || opensStaffForm(customId);
+
 export const adminUnavailable = () => new AppError('ADMIN_DISABLED', 'أدوات الإدارة مش جاهزة للتشغيل دلوقتي.', 503);
 
 export function createAdministration(dependencies) {
@@ -42,19 +48,30 @@ export function createAdministration(dependencies) {
     }
   }
   return {
-    core: c, config: configActions(c), ticket: { ...ticket, alerts: ticket.complaints.status }, guide, rules, server, welcome: welcomeActions(c), staff: { ...staffActions(c), practice: training.practice }, kb: knowledgeActions(c),
+    core: c, config: configActions(c), ticket: { ...ticket, alerts: ticket.complaints.status }, guide, rules, server, welcome: welcomeActions(c), staff: { ...staffActions(c, ticket), practice: training.practice }, kb: knowledgeActions(c),
     mod: moderationActions(c), content: contentActions(c), idea: ideaActions(c), diagnostics: diagnosticActions(c),
     room: roomActions(c), discussion: discussionActions(c), calendar: calendarActions(c), incident: incidentActions(c),
     publication: publicationActions(c), my: { view: ownRequests(c) }, auto, voice, report,
-    complaintForm: ticket.complaintForm,
+    form(i) {
+      if (i.customId === 'bx:x:complaint:open') return ticket.complaintForm(i);
+      const control = opensStaffForm(i.customId) && CASE_BUTTON.exec(i.customId);
+      if (!control) throw stale();
+      return ticket.staffForm(i, control[1], control[2]);
+    },
     async modal(i) {
-      const match = /^bx:x:complaint:([0-9]{17,20})$/.exec(i.customId);
-      if (!match) throw stale();
-      return ticket.complain(i, match[1], i.fields.getTextInputValue('details'));
+      const match = COMPLAINT_MODAL.exec(i.customId);
+      if (match) return ticket.complain(i, match[1], i.fields.getTextInputValue('details'));
+      const control = opensStaffForm(i.customId) && CASE_BUTTON.exec(i.customId);
+      if (!control) throw stale();
+      const [, action, id] = control;
+      const field = action === 'close' ? 'reason' : 'body';
+      return ticket[action](i, { id, [field]: i.fields.getTextInputValue(field) });
     },
     async button(i) {
       const approve = /^bx:x:server:([0-9]{17,20})$/.exec(i.customId);
       if (approve) return server.confirm(i, approve[1]);
+      const control = CASE_BUTTON.exec(i.customId);
+      if (control?.[1] === 'claim') return ticket.claim(i, { id: control[2] });
       if (i.customId.startsWith('bx:x:train:')) return training.button(i);
       const match = /^bx:x:(ticket|interest):([a-z]+)$/.exec(i.customId);
       if (!match) throw stale();

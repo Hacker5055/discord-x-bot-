@@ -5,27 +5,18 @@ import { PERMISSION, canManageRole, hasPermission } from './discord/permissions.
 import { MANAGED_ROLE_PERMISSIONS, planWebhooks, readGuildState, readRoleState, resolveRoles,
   resolveRooms, targetRoleOrder } from './discord/state.js';
 
-export function roomSettings(key, topic, guildId, botId, parentId) {
-  const { name, readOnly } = ROOMS[key];
+function markedTopic(key, topic = '') {
   const marker = roomMarker(key);
+  if (topic?.includes(marker)) return topic;
   const oldTopic = (topic ?? '').replace(/\[BLACK X · (updates|support|creators|offers)\]/gu, '').trim();
-  const markedTopic = oldTopic ? `${marker}\n${oldTopic}` : marker;
+  return truncate(oldTopic ? `${marker}\n${oldTopic}` : marker, 1024).trimEnd();
+}
+
+function newRoomSettings(key, guildId, botId, parentId) {
+  const { name, readOnly } = ROOMS[key];
   const everyone = { id: guildId, type: 0, allow: readOnly ? '1024' : '3072', deny: readOnly ? '2048' : '0' };
-  return {
-    name, topic: truncate(markedTopic, 1024).trimEnd(),
-    ...(parentId ? { parent_id: parentId } : {}),
-    permission_overwrites: readOnly ? [everyone, { id: botId, type: 1, allow: '3072', deny: '0' }] : [everyone],
-  };
-}
-
-function overwriteSignature(overwrites = []) {
-  return overwrites.map(({ id, type, allow, deny }) => `${type}:${id}:${allow}:${deny}`).sort().join('|');
-}
-
-export function roomNeedsUpdate(room, settings) {
-  const { permission_overwrites, ...fields } = settings;
-  return Object.entries(fields).some(([key, value]) => room[key] !== value)
-    || overwriteSignature(room.permission_overwrites) !== overwriteSignature(permission_overwrites);
+  return { name, topic: roomMarker(key), parent_id: parentId,
+    permission_overwrites: readOnly ? [everyone, { id: botId, type: 1, allow: '3072', deny: '0' }] : [everyone] };
 }
 
 export function roleSettings(key) {
@@ -74,29 +65,25 @@ export async function provisionGuild({ api, config, botId, dryRun = false }) {
   }
 
   if (!hasPermission(state.botPermissions, PERMISSION.ManageChannels)) warnings.push('صلاحية Manage Channels ناقصة على مستوى السيرفر.');
-  if (!hasPermission(state.botPermissions, PERMISSION.ManageWebhooks)) warnings.push('صلاحية Manage Webhooks ناقصة على مستوى السيرفر.');
 
-  const categoryMissing = !category;
-  if (categoryMissing) {
+  if (!category) {
     category = await step('إنشاء كاتيجوري BLACK X', () => api.createChannel(guildId, { name: CATEGORY_NAME, type: 4 },
       async () => (await api.getChannels(guildId)).find(({ type, name }) => type === 4 && name === CATEGORY_NAME)));
-  } else if (category.name !== CATEGORY_NAME) {
-    category = await step('تصحيح اسم الكاتيجوري', () => api.updateChannel(category.id, { name: CATEGORY_NAME })) ?? category;
   }
 
   for (const key of ROOM_KEYS) {
     const current = rooms[key];
-    const desired = roomSettings(key, current?.topic, guildId, botId, category?.id);
     if (!current) {
       if (category || dryRun) {
-        const created = await step(`إنشاء روم ${key}`, () => api.createChannel(guildId, { type: 0, ...desired },
+        const created = await step(`إنشاء روم ${key}`, () => api.createChannel(guildId, { type: 0, ...newRoomSettings(key, guildId, botId, category?.id) },
           async () => resolveRooms(await api.getChannels(guildId), config).rooms[key]));
         if (created) rooms[key] = created;
       } else {
         warnings.push(`تخطّيت إنشاء ${key} لأن الكاتيجوري غير متاح.`);
       }
-    } else if ((dryRun && categoryMissing) || roomNeedsUpdate(current, desired)) {
-      rooms[key] = await step(`تصحيح روم ${key}`, () => api.updateChannel(current.id, desired)) ?? current;
+    } else if (!current.topic?.includes(roomMarker(key))) {
+      // /server prepare and owners manage existing room ACLs, names and placement.
+      await step(`إضافة علامة الربط لروم ${key}`, () => api.updateChannel(current.id, { topic: markedTopic(key, current.topic) }));
     }
   }
 
@@ -159,24 +146,18 @@ export async function provisionGuild({ api, config, botId, dryRun = false }) {
       warnings.push(`تعذّر فحص ويب هوك ${key}: ${describeError(error)}`);
       continue;
     }
-    if (plan.stale) warnings.push(`ويب هوك ${key} المضبوط في البيئة غير متاح في الروم؛ سأستخدم الاسم بديلًا.`);
-    if (plan.keep || plan.named.length === 1) webhookIds[key] = (plan.keep ?? plan.named[0]).id;
-    let deleteFailed = false;
-    for (const old of plan.remove) {
-      const deleted = await step(`حذف ويب هوك BLACK X القديم في ${key}`, async () => {
-        await api.deleteWebhook(old.id);
-        return true;
-      });
-      if (!dryRun && !deleted) deleteFailed = true;
-      if (deleted && webhookIds[key] === old.id) delete webhookIds[key];
-    }
-    if (plan.keep) {
-      if (plan.keep.name !== WEBHOOK_NAME) {
-        await step(`تصحيح اسم ويب هوك ${key}`, () => api.updateWebhook(plan.keep.id, { name: WEBHOOK_NAME }));
-      }
-    } else if (!deleteFailed) {
+    if (plan.stale) warnings.push(`معرّف ${webhookEnv(key)} مش موجود في الروم؛ راجع قيمة الربط.`);
+    if (plan.selected) {
+      webhookIds[key] = plan.selected.id;
+    } else if (plan.ambiguous) {
+      warnings.push(`فيه أكتر من ويب هوك باسم BLACK X Bot في ${key}. ثبّت معرّف النسخة المستخدمة في ${webhookEnv(key)}. مفيش ويب هوك اتغيّر.`);
+    } else {
       const hook = await step(`إنشاء ويب هوك ${key}`, () => api.createWebhook(channel.id, { name: WEBHOOK_NAME },
-        async () => planWebhooks(await api.getWebhooks(channel.id), channel.id).named[0]));
+        async () => {
+          const recovery = planWebhooks(await api.getWebhooks(channel.id), channel.id, config.webhookIds[key]);
+          if (recovery.ambiguous) throw new AppError('WEBHOOK_AMBIGUOUS', `راجع الويب هوكات في ${key} من Integrations قبل إعادة المحاولة.`);
+          return recovery.selected;
+        }));
       if (hook) webhookIds[key] = hook.id;
     }
   }

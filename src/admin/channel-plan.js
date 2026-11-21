@@ -5,7 +5,7 @@ import { isSnowflake } from '../lib/catalog.js';
 import { AppError } from '../lib/errors.js';
 import { roomRef, TEXT_ROOMS } from './core.js';
 
-export const PROFILES = ['rules', 'read_only', 'open', 'restricted', 'staff', 'owner_only'];
+export const PROFILES = ['rules', 'read_only', 'open', 'restricted', 'staff', 'staff_log', 'owner_only'];
 export const SETUP_TYPES = [...TEXT_ROOMS, C.GuildCategory, C.GuildForum, C.GuildVoice, C.GuildStageVoice, C.GuildMedia];
 const TYPED_TEXT = [...TEXT_ROOMS, C.GuildForum, C.GuildMedia, C.GuildCategory];
 const TYPED_VOICE = [C.GuildVoice, C.GuildStageVoice, C.GuildCategory];
@@ -15,7 +15,14 @@ const QUIET = CHAT | P.CreatePublicThreads | P.CreatePrivateThreads | P.AddReact
 const VOICE = P.Connect | P.Speak;
 const COMMANDS = P.UseApplicationCommands;
 const EDIT = P.ViewChannel | P.ManageChannels | P.ManageRoles;
-export const TICKET_CATEGORY_NEEDS = EDIT | P.SendMessages | P.ReadMessageHistory | P.EmbedLinks;
+export const TICKET_ACCESS = P.ViewChannel | P.SendMessages | P.ReadMessageHistory;
+export const TICKET_BOT = TICKET_ACCESS | P.EmbedLinks;
+export function checkTicketCategory(c, w, category) {
+  // Creating a guild channel checks guild permissions. The private child is unsynced: closing it
+  // needs Manage Roles from the bot's guild role, not a category-only overwrite.
+  c.botNeeds(w, undefined, EDIT | TICKET_BOT);
+  c.botNeeds(w, category, EDIT | TICKET_BOT);
+}
 export const roomError = (ch, message, code = 'SERVER_PREPARE_ROOM') => new AppError(code, `${roomRef(ch.id)}: ${message}`, 409);
 const tuple = ({ id, type, allow, deny }) => ({ id, type, allow: String(allow), deny: String(deny) });
 export const acl = (ch) => (ch.permission_overwrites ?? []).map(tuple).sort((a, b) => a.type - b.type || a.id.localeCompare(b.id));
@@ -50,11 +57,11 @@ export function protectedRoom(c, w, a, ch, special) {
 
 export function checkProfile(c, w, a, ch, spec) {
   protectedRoom(c, w, a, ch, spec.profile);
-  if ((['rules', 'ticket_panel', 'support_staff'].includes(spec.profile) && !TEXT_ROOMS.includes(ch.type)) ||
+  if ((['rules', 'ticket_panel', 'support_staff', 'staff_log'].includes(spec.profile) && !TEXT_ROOMS.includes(ch.type)) ||
     (spec.profile === 'ticket_category' && ch.type !== C.GuildCategory) || (spec.profile === 'read_only' && !TYPED_TEXT.includes(ch.type))) {
     throw roomError(ch, 'نوع الروم مش مناسب للغرض ده.');
   }
-  if (['restricted', 'staff', 'support_staff', 'ticket_category'].includes(spec.profile)) {
+  if (['restricted', 'staff', 'staff_log', 'support_staff', 'ticket_category'].includes(spec.profile)) {
     setupRole(c, w, a, spec.roleId, spec.profile !== 'restricted');
   } else if (spec.roleId) throw roomError(ch, 'الغرض ده مش محتاج اختيار رول.');
 }
@@ -69,7 +76,7 @@ const upsert = (rows, id, type, allow, deny) => {
 
 export function plannedAcl(c, ch, { profile, roleId }) {
   const publiclyVisible = ['rules', 'read_only', 'open', 'ticket_panel'].includes(profile);
-  const readOnly = ['rules', 'read_only', 'ticket_panel'].includes(profile);
+  const readOnly = ['rules', 'read_only', 'ticket_panel', 'staff_log'].includes(profile);
   const text = TYPED_TEXT.includes(ch.type);
   const voice = TYPED_VOICE.includes(ch.type);
   const operational = ['rules', 'ticket_panel', 'support_staff', 'ticket_category'].includes(profile);
@@ -79,8 +86,9 @@ export function plannedAcl(c, ch, { profile, roleId }) {
   const mask = READ | COMMANDS | (readOnly ? quiet : write) | (operational ? P.EmbedLinks : 0n);
   const rows = acl(ch).map(({ id, type, allow, deny }) => tuple({ id, type, allow: BigInt(allow) & ~mask, deny: BigInt(deny) & ~mask }));
   const audience = publiclyVisible ? READ | (readOnly ? 0n : write) | (ordinaryCommands ? COMMANDS : 0n) : 0n;
-  upsert(rows, c.guildId, 0, audience, publiclyVisible ? (readOnly ? quiet | (ordinaryCommands ? 0n : COMMANDS) : 0n) : P.ViewChannel);
-  if (roleId) upsert(rows, roleId, 0, READ | (profile === 'ticket_category' ? 0n : write | COMMANDS), 0n);
+  const deny = (publiclyVisible ? 0n : P.ViewChannel) | (readOnly ? quiet | (ordinaryCommands ? 0n : COMMANDS) : 0n);
+  upsert(rows, c.guildId, 0, audience, deny);
+  if (roleId) upsert(rows, roleId, 0, READ | (readOnly || profile === 'ticket_category' ? 0n : write | COMMANDS), 0n);
   // Retain the bot's access without granting Server Administrator or modifying any guild role.
   const bot = acl(ch).find((row) => row.id === c.botId && row.type === 1);
   upsert(rows, c.botId, 1, READ | (operational ? P.SendMessages | P.EmbedLinks : 0n) | (BigInt(bot?.allow ?? 0) & mask), 0n);
@@ -117,7 +125,10 @@ export function planChannels(c, w, a, specs) {
   const sorted = Object.entries(specs).sort(([aId], [bId]) =>
     Number(byId.get(bId)?.type === C.GuildCategory) - Number(byId.get(aId)?.type === C.GuildCategory) || aId.localeCompare(bId));
   for (const [id, spec] of sorted) {
-    const ch = c.findRoom(w, id, SETUP_TYPES);
+    const ch = byId.get(id);
+    if (!ch || (ch.guild_id && ch.guild_id !== c.guildId) || !SETUP_TYPES.includes(ch.type)) {
+      throw new AppError('ADMIN_ROOM', `الربط المحفوظ للروم (${id}) مش صالح أو البوت مش شايفه. راجع View Channel؛ لو الروم اتحذف، شيل الربط بـ /server unbind channel_id:${id}.`);
+    }
     checkProfile(c, w, a, ch, spec);
     if (inherited.has(id)) continue;
     const before = acl(ch);
@@ -125,7 +136,7 @@ export function planChannels(c, w, a, specs) {
     const updated = { ...ch, permission_overwrites: after };
     const children = syncedChildren(w.channels, ch);
     if (['rules', 'ticket_panel', 'support_staff'].includes(spec.profile)) c.postNeeds(w, updated);
-    if (spec.profile === 'ticket_category') c.botNeeds(w, updated, TICKET_CATEGORY_NEEDS);
+    if (spec.profile === 'ticket_category') checkTicketCategory(c, w, updated);
     if (equal(before, after)) continue;
     checkAclWrite(c, w, ch, before, after);
     c.botNeeds(w, updated, EDIT);

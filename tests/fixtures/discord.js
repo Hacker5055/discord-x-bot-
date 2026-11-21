@@ -14,7 +14,7 @@ export const MISSING_MEMBER_ID = '100000000000000007';
 export const FAKE_BOT_TOKEN = 'mock-bot-credential-not-for-discord';
 export const FAKE_API_SECRET = 'mock-api-credential-not-for-production';
 export const FAKE_WEBHOOK_TOKEN = 'mock-webhook-credential-not-for-discord';
-export const INVITE_BITS = '805309456';
+export const INVITE_BITS = '805391376'; // Standard BLACK X permissions plus optional Manage Webhooks.
 const BASE_ID = 100000000000000100n;
 
 export const fixtureEnv = () => ({ DISCORD_GUILD_ID: GUILD_ID, BX_OWNER_DISCORD_ID: OWNER_ID,
@@ -31,6 +31,7 @@ export class MemoryDiscord {
     { id: '100000000000000009', name: 'An unrelated higher role', position: 3, permissions: '0', managed: false },
   ];
   ownerId = OWNER_ID;
+  features = [];
   onboarding = { guild_id: GUILD_ID, enabled: false, default_channel_ids: [], prompts: [], mode: 0 };
   channels = [];
   threads = [];
@@ -54,7 +55,7 @@ export class MemoryDiscord {
   async getGuild(guildId) {
     this.check(guildId);
     this.add('getGuild', 'GET');
-    return { id: GUILD_ID, owner_id: this.ownerId, approximate_member_count: this.members.size };
+    return { id: GUILD_ID, owner_id: this.ownerId, approximate_member_count: this.members.size, features: [...this.features] };
   }
 
   async getOnboarding(guildId) {
@@ -218,16 +219,6 @@ export class MemoryDiscord {
     const hook = { id: this.nextId(), type: 1, channel_id: channelId, name, token: FAKE_WEBHOOK_TOKEN };
     this.hooks.push(hook);
     return this.copy(hook);
-  }
-
-  async updateWebhook(webhookId, data) {
-    this.add('updateWebhook', 'PATCH', { webhookId, data });
-    return this.copy(Object.assign(this.hooks.find(({ id }) => id === webhookId), data));
-  }
-
-  async deleteWebhook(webhookId) {
-    this.add('deleteWebhook', 'DELETE', { webhookId });
-    this.hooks = this.hooks.filter((hook) => hook.id !== webhookId);
   }
 
   async createMessage(channelId, data) {

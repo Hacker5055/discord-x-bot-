@@ -40,9 +40,9 @@ heroku stack:set container --app "$APP_NAME"
 
 ## ٣. تشغيل النشر والتحقق
 
-1. بعد دمج الـPR في `main`، افتح **Actions → Deploy BLACK X to Heroku → Run workflow** واختر `main`.
+1. بعد دمج الـPR في `main`، افتح **Actions → Deploy BLACK X to Heroku → Run workflow** واختر `main`. ممكن تكتب اسم التطبيق المقصود في `expected_app`؛ لو مش مطابق لإعداد بيئة النشر، الأمر بيقف قبل الرفع.
 2. بعد أول إصدار، من **Heroku Dashboard → Resources** اضبط **dyno واحد `web` على Basic أو Standard**. لا تحتاج `worker` لأن نفس العملية تشغّل Gateway وواجهة HTTP. `Eco` قد ينام عند عدم وجود نشاط HTTP، فلا تعتمد عليه لإبقاء البوت متصلًا. الخطط الدائمة مدفوعة؛ الـAction لا يغيّر خطة الحساب أو عدد الـdynos.
-3. تابع السجل وتحقق من `gateway_ready`، ثم جرّب `/setup dry_run:true` داخل Discord. نجاح الـAction يعني أن Heroku قبل طلب الإصدار، وليس أن الـGateway أصبح جاهزًا بعد.
+3. تابع السجل وتحقق من `gateway_ready`، ثم جرّب `/status` داخل Discord. لتجهيز الدعم والرومات، استخدم المعاينة بـ`/server prepare`، مش إعادة `/setup`. نجاح الـAction يعني أن Heroku قبل طلب الإصدار، وليس أن الـGateway أصبح جاهزًا بعد.
 
 ```bash
 heroku ps --app "$APP_NAME"
@@ -54,6 +54,7 @@ heroku logs --tail --app "$APP_NAME"
 | لو حصل | راجع |
 |---|---|
 | فشل التحقق من تطبيق Heroku قبل الرفع | `HEROKU_APP_NAME`، وسر `HEROKU_API_KEY`، وصلاحية الحساب على التطبيق، و`container` stack على Cedar. |
+| Heroku رفض إصدار الصورة بعد الرفع | راجع كود HTTP في رسالة **Push and release to Heroku** وActivity للتطبيق. لو الاتصال انقطع ونتيجة الإصدار مش مؤكدة، افحص Activity قبل إعادة المحاولة. مفيش قيمة سر لازم تتبعت في الشات. |
 | لا يظهر زر **Run workflow** | تأكد أن `.github/workflows/deploy-heroku.yml` وصل إلى `main`. |
 | الإصدار اتقبل والبوت Offline أو ظهر `H10` / `R10` | افحص `heroku logs`، قم بتشغيل `web` واحد، راجع Config Vars، واترك `PORT` لـ Heroku. |
 

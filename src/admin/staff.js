@@ -14,7 +14,7 @@ const median = (nums) => {
   return (sorted[Math.floor((nums.length - 1) / 2)] + sorted[Math.floor(nums.length / 2)]) / 2;
 };
 
-export function staffActions(c) {
+export function staffActions(c, ticket) {
   const scope = (i, team) => c.session(i, { team: fixedChoice(TEAMS, team) });
   return {
     async inbox(i, { team }) {
@@ -23,6 +23,7 @@ export function staffActions(c) {
       return [`📋 ${team}: ${list.length} طلب مفتوح`, ...list.slice(0, 20).map(requestLine), ...(!list.length ? ['مفيش طلبات مستنية.'] : [])];
     },
     async detail(i, { team, id }) {
+      if (team === 'support') return ticket.staffDetail(i, { id });
       const s = await scope(i, team);
       const r = requestAt(s.a.requests, id);
       if (requestTeam[r.kind] !== team) throw notFound();
@@ -81,7 +82,7 @@ export function staffActions(c) {
       const value = median(first);
       return ['📈 دعم BLACK X · آخر ٧ أيام', `اتفتحت: ${opened.length} · اتقفلت: ${closed.length} · لسه مفتوحة: ${rows.filter((r) => r.openedAt && !r.closedAt).length}.`,
         `وسيط وقت أول رد مُسجّل: ${value === undefined ? 'مفيش ردود مسجلة' : `${Math.round(value / 60_000)} دقيقة (${first.length} تذكرة)`}.`,
-        'القياس من /ticket reply بس. البوت ما بيراقبش رسائل الشات.'];
+        'القياس من الردود المسجّلة بالأمر أو زر الرد أو الموقع. البوت ما بيراقبش رسائل الشات.'];
     },
   };
 }

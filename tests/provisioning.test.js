@@ -40,43 +40,39 @@ test('first provisioning creates the complete guild and an ID-only env block', a
   assert.doesNotMatch(result.env, /DISCORD_BOT_TOKEN|https:\/\//);
 });
 
-test('second provisioning creates no duplicate and rotates only unpinned BX incoming webhooks', async () => {
+test('repeat provisioning reuses unique webhooks without replacing a link', async () => {
   const api = new MemoryDiscord();
   const first = fromBlock((await setup(api)).env);
-  const originalRoom = first.DISCORD_CHANNEL_UPDATES;
-  const duplicate = await api.createWebhook(originalRoom, { name: WEBHOOK_NAME });
-  const unrelated = await api.createWebhook(originalRoom, { name: 'An unrelated integration' });
-  const follower = { id: api.nextId(), type: 2, name: WEBHOOK_NAME, channel_id: originalRoom };
-  api.hooks.push(follower);
+  const hooks = structuredClone(api.hooks);
   api.operations = [];
-
-  const second = fromBlock((await setup(api)).env);
+  assert.deepEqual(fromBlock((await setup(api)).env), first);
+  assert.deepEqual(api.hooks, hooks);
+  assert.deepEqual(api.writes, []);
   verifyCounts(api);
-  assert.ok(api.hooks.some(({ id }) => id === unrelated.id));
-  assert.ok(api.hooks.some(({ id }) => id === follower.id));
-  assert.ok(!api.hooks.some(({ id }) => id === duplicate.id));
-  assert.ok(api.writes.every(({ operation }) => ['deleteWebhook', 'createWebhook'].includes(operation)));
-  for (const [key, value] of Object.entries(first)) {
-    if (key.startsWith('DISCORD_WEBHOOK_')) assert.notEqual(second[key], value);
-    else assert.equal(second[key], value);
-  }
 });
 
-test('configured webhook references are reused and a pinned repeated setup is write-free', async () => {
+test('ambiguous incoming webhooks are left intact and a pinned ID is kept with its custom name', async () => {
   const api = new MemoryDiscord();
   const env = fromBlock((await setup(api)).env);
-  const current = api.hooks.find(({ id }) => id === env.DISCORD_WEBHOOK_UPDATES);
-  current.name = 'Custom name';
-  const duplicate = await api.createWebhook(env.DISCORD_CHANNEL_UPDATES, { name: WEBHOOK_NAME });
+  const channel = env.DISCORD_CHANNEL_UPDATES;
+  const first = api.hooks.find(({ id }) => id === env.DISCORD_WEBHOOK_UPDATES);
+  await api.createWebhook(channel, { name: WEBHOOK_NAME });
+  await api.createWebhook(channel, { name: 'An unrelated integration' });
+  api.hooks.push({ id: api.nextId(), type: 2, name: WEBHOOK_NAME, channel_id: channel });
+  const original = structuredClone(api.hooks);
+  api.operations = [];
+  const result = await setup(api);
+  assert.equal(fromBlock(result.env).DISCORD_WEBHOOK_UPDATES, '');
+  assert.match(result.warnings.join('\n'), /أكتر من ويب هوك.*DISCORD_WEBHOOK_UPDATES/);
+  assert.deepEqual(api.hooks, original);
+  assert.deepEqual(api.writes, []);
+
+  first.name = 'Custom name';
   const config = readConfig({ ...fixtureEnv(), ...env,
-    DISCORD_WEBHOOK_UPDATES: `https://discord.com/api/webhooks/${current.id}/${FAKE_WEBHOOK_TOKEN}` });
-  api.operations = [];
+    DISCORD_WEBHOOK_UPDATES: `https://discord.com/api/webhooks/${first.id}/${FAKE_WEBHOOK_TOKEN}` });
   assert.deepEqual(fromBlock((await setup(api, { config })).env), env);
-  assert.equal(current.name, WEBHOOK_NAME);
-  assert.ok(!api.hooks.some(({ id }) => id === duplicate.id));
-  assert.deepEqual(api.writes.map(({ operation }) => operation), ['deleteWebhook', 'updateWebhook']);
-  api.operations = [];
-  assert.deepEqual(fromBlock((await setup(api, { config })).env), env);
+  assert.equal(first.name, 'Custom name');
+  assert.equal(api.hooks.length, original.length);
   assert.deepEqual(api.writes, []);
 });
 
@@ -138,7 +134,7 @@ test('dry_run plans both a fresh setup and reconciliation with zero mutations', 
   await setup(api);
   api.operations = [];
   const second = await setup(api, { dryRun: true });
-  assert.match(second.actions.join('\n'), /حذف ويب هوك/);
+  assert.deepEqual(second.actions, []);
   assert.deepEqual(api.writes, []);
   verifyCounts(api);
 });
@@ -150,15 +146,17 @@ test('a room is matched by its topic marker, not by the display name', async () 
   const env = fromBlock((await setup(api)).env);
   assert.equal(env.DISCORD_CHANNEL_UPDATES, correct.id);
   assert.equal(api.channels.find(({ id }) => id === decoy.id).topic, ' unrelated ');
-  assert.equal(api.channels.find(({ id }) => id === correct.id).topic, `${roomMarker('updates')}\nA description`);
-  assert.equal(api.channels.find(({ id }) => id === correct.id).name, ROOMS.updates.name);
+  assert.equal(api.channels.find(({ id }) => id === correct.id).topic, `A description\n${roomMarker('updates')}`);
+  assert.equal(api.channels.find(({ id }) => id === correct.id).name, 'renamed');
 });
 
-test('configured channel and role IDs take precedence and are repaired in place', async () => {
+test('configured IDs take precedence without altering an existing channel’s name, parent or ACL', async () => {
   const api = new MemoryDiscord();
-  const room = await api.createChannel(GUILD_ID, { type: 0, name: 'existing', topic: 'A description' });
+  const parent = await api.createChannel(GUILD_ID, { type: 4, name: 'existing category' });
+  const room = await api.createChannel(GUILD_ID, { type: 0, name: 'existing', topic: 'A description', parent_id: parent.id,
+    permission_overwrites: [{ id: GUILD_ID, type: 0, allow: '0', deny: '1024' }] });
   const role = await api.createRole(GUILD_ID, { name: 'my VIP', permissions: '8', color: 0, hoist: false, mentionable: true });
-  const config = readConfig({ ...fixtureEnv(), DISCORD_CHANNEL_OFFERS: room.id, DISCORD_ROLE_VIP_BASIC: role.id });
+  const config = readConfig({ ...fixtureEnv(), DISCORD_CHANNEL_CATEGORY: parent.id, DISCORD_CHANNEL_OFFERS: room.id, DISCORD_ROLE_VIP_BASIC: role.id });
   const env = fromBlock((await setup(api, { config })).env);
   assert.equal(env.DISCORD_CHANNEL_OFFERS, room.id);
   assert.equal(env.DISCORD_ROLE_VIP_BASIC, role.id);
