@@ -40,7 +40,7 @@ heroku stack:set container --app "$APP_NAME"
 
 ## ٣. تشغيل النشر والتحقق
 
-1. بعد دمج الـPR في `main`، افتح **Actions → Deploy BLACK X to Heroku → Run workflow** واختر `main`. ممكن تكتب اسم التطبيق المقصود في `expected_app`؛ لو مش مطابق لإعداد بيئة النشر، الأمر بيقف قبل الرفع. الصورة بتترفع كـmanifest واحد لـ`linux/amd64`. قبل الإصدار، الـworkflow يطابق `config.digest` من Heroku Registry مع الـconfig اللي خرج من البناء؛ `.Id` المحلي ممكن يبقى معرّف الـmanifest على Docker الحديث ومش صالح للإصدار. لو التحقق فشل، مش هيطلب إصدار.
+1. بعد دمج الـPR في `main`، افتح **Actions → Deploy BLACK X to Heroku → Run workflow** واختر `main`. ممكن تكتب اسم التطبيق المقصود في `expected_app`؛ لو مش مطابق لإعداد بيئة النشر، الأمر بيقف قبل الرفع. الصورة بتترفع كـmanifest واحد لـ`linux/amd64`. قبل الإصدار، الـworkflow يطابق `config.digest` من Heroku Registry مع بصمة الـconfig الفعلي جوّه أرشيف الصورة بعد البناء. `.Id` وبعض بيانات Buildx ممكن تشير للـmanifest أو الـindex بدل الـconfig؛ الاختبار في PR يبني الصورة ويحسب البصمة على نفس نوع runner، من غير رفع أو أسرار. لو التحقق فشل، مش هيطلب إصدار.
 2. بعد أول إصدار، من **Heroku Dashboard → Resources** اضبط **dyno واحد `web` على Basic أو Standard**. لا تحتاج `worker` لأن نفس العملية تشغّل Gateway وواجهة HTTP. `Eco` قد ينام عند عدم وجود نشاط HTTP، فلا تعتمد عليه لإبقاء البوت متصلًا. الخطط الدائمة مدفوعة؛ الـAction لا يغيّر خطة الحساب أو عدد الـdynos.
 3. تابع السجل وتحقق من `gateway_ready`، ثم جرّب `/status` داخل Discord. لتجهيز الدعم، استخدم معاينة `/setup`؛ وللاختيار اليدوي أو أذونات باقي الرومات، استخدم `/server prepare`. نجاح الـAction يعني أن Heroku قبل طلب الإصدار، وليس أن الـGateway أصبح جاهزًا بعد.
 
