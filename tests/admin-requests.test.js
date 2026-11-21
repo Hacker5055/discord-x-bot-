@@ -109,11 +109,12 @@ test('ticket recovery reuses an unconfirmed room and refuses to post or close if
   assert.equal(r.status, 'open');
   assert.equal(f.api.channels.filter((ch) => ch.topic?.startsWith('bx-ticket:')).length, 1);
   const ch = f.api.channel(r.channelId);
+  const messages = f.api.messages.length;
   ch.permission_overwrites.push(own(STRANGER, P.ViewChannel));
   await assert.rejects(f.admin.ticket.reply(scopes(f), { id: r.id, body: 'private' }), { code: 'ADMIN_TICKET_PRIVACY' });
   ch.topic = 'no-longer-a-ticket';
   await assert.rejects(f.admin.ticket.close(scopes(f), { id: r.id, reason: 'resolved' }), { code: 'ADMIN_STALE' });
-  assert.equal(f.api.messages.length, 0);
+  assert.equal(f.api.messages.length, messages);
   assert.equal(f.api.writes.filter(({ operation }) => operation === 'putOverwrite').length, 0);
 });
 

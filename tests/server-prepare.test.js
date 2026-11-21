@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { ChannelType as C, MessageFlags, PermissionFlagsBits as P } from 'discord.js';
 import { DiscordApiError } from '../src/lib/errors.js';
 import { DiscordApi } from '../src/discord/api.js';
+import { provisionGuild } from '../src/provisioning.js';
 import { canManageRole, hasPermission } from '../src/discord/permissions.js';
 import { adminFixture, asText, DIM, group, own, REVIEWER, STRANGER } from './fixtures/admin.js';
 import { BOT_ID, BOT_ROLE_ID, FAKE_API_SECRET, GUILD_ID, MEMBER_ID, MOD_ID, OTHER_GUILD_ID, OWNER_ID } from './fixtures/discord.js';
@@ -93,6 +94,12 @@ test('preparation is owner-only with a read-only preview and applies approved ru
   await f.setup();
   assert.equal(messagesAt(f, rules.id).length, 1);
   assert.equal(messagesAt(f, f.panel.id).length, 1);
+  const stable = structuredClone(f.api.channels);
+  f.api.operations = [];
+  await provisionGuild(f);
+  assert.deepEqual(f.api.channels, stable); // Legacy setup must not reopen the prepared panel to chat.
+  assert.equal(asText(f.api.hooks), integrations);
+  assert.deepEqual(f.api.writes, []);
 });
 
 test('approval uses live overwrites and refuses synced conflicts, unsafe roles and non-ticket categories', async () => {
@@ -203,8 +210,9 @@ test('the private complaint form stores one ticket and the owner gets the form t
   assert.ok(!asText(msg.replies).includes(body));
   const r = (await state(f)).requests[msg.id];
   assert.equal(r.type, 'report');
-  assert.equal(messagesAt(f, r.channelId).length, 1);
-  assert.match(messagesAt(f, r.channelId)[0].data.embeds[0].description, /تفاصيل سرية/);
+  assert.equal(messagesAt(f, r.channelId).length, 2); // One case header and one private form.
+  const complaint = messagesAt(f, r.channelId).find(({ data }) => data.embeds[0].title === '📝 شكوى من صاحب التذكرة');
+  assert.match(complaint.data.embeds[0].description, /تفاصيل سرية/);
   assert.equal(await access(f, f.api.channel(r.channelId), STRANGER), false);
   assert.ok(!JSON.stringify(await f.store.read()).includes('تفاصيل سرية'));
   assert.equal(f.api.dms.size, 0);
@@ -227,7 +235,7 @@ test('the private complaint form stores one ticket and the owner gets the form t
   await f.invoke(double);
   assert.match(asText(double.replies), /ما كررناش/);
   assert.equal(Object.keys((await state(f)).requests).length, 1);
-  assert.equal(messagesAt(f, r.channelId).length, 1);
+  assert.equal(messagesAt(f, r.channelId).length, 2);
   assert.equal(messagesAt(f, f.panel.id).length, 1);
   assert.doesNotMatch(f.logs.join(''), /تفاصيل سرية/);
   assert.equal(ownerDm[0].data.allowed_mentions.parse.length, 0);
@@ -373,7 +381,7 @@ test('a form post with a lost acknowledgement leaves one private ticket and send
   await f.invoke(first);
   assert.match(asText(first.replies), /وصول نص الشكوى مش مؤكد/);
   const ticket = (await state(f)).requests[first.id];
-  assert.equal(messagesAt(f, ticket.channelId).length, 1);
+  assert.equal(messagesAt(f, ticket.channelId).length, 2);
   await tick(f, 40_000);
   assert.match(asText(messagesAt(f, f.api.dms.get(OWNER_ID))), new RegExp(ticket.channelId));
   assert.doesNotMatch(asText(messagesAt(f, f.api.dms.get(OWNER_ID))), /بيانات النموذج/);
@@ -400,4 +408,66 @@ test('closing the owner DM does not open any fallback to a compromised staff roo
   assert.equal(messagesAt(f, f.api.dms.get(MOD_ID)).length, 1);
   assert.equal(messagesAt(f, f.api.dms.get(REVIEWER)).length, 1);
   assert.match(asText(await f.admin.ticket.alerts(f.make(), { id: first.id })), /روم الفريق: اتخطّى/);
+});
+
+
+test('prepare identifies bad picker fields, saved targets and obsolete explicit bindings independently', async () => {
+  const f = await system();
+  await assert.rejects(f.admin.server.prepare(f.make(), { panel: f.panel }),
+    { code: 'SERVER_PREPARE_SUPPORT', message: /category.*staff.*role/ });
+  await assert.rejects(f.admin.server.prepare(f.make(), { ...f.refs, category: f.panel }),
+    { code: 'ADMIN_ROOM', message: /category: الاختيار الحالي.*كاتيجوري/ });
+  const writes = f.api.writes.length;
+  await f.room('ticket_category', f.category);
+  await f.room('site_staff', f.staff);
+  await f.room('ticket_panel', f.panel);
+  await f.team('support', { withRole: f.supportRole });
+  const extra = await f.chan(C.GuildText, 'obsolete');
+  await bind(f, extra, 'read_only');
+  f.api.channels = f.api.channels.filter(({ id }) => id !== f.staff.id && id !== extra.id);
+  await assert.rejects(f.admin.server.prepare(f.make(), {}), { code: 'ADMIN_ROOM', message: /staff: الربط المحفوظ.*View Channel/ });
+  const replacement = await f.chan(C.GuildText, 'new-staff');
+  await assert.rejects(f.admin.server.prepare(f.make(), { staff: replacement }),
+    { code: 'ADMIN_ROOM', message: new RegExp(`/server unbind channel_id:${extra.id}`) });
+  await f.admin.server.unbind(f.make(), { channel_id: extra.id });
+  assert.ok(approval(await f.admin.server.prepare(f.make(), { staff: replacement })));
+  assert.equal(f.api.writes.length, writes + 2); // Only the two test channels were created.
+});
+
+test('private read-only logs give only the dedicated role access and never produce a new log feed', async () => {
+  const f = await system();
+  const mod = await f.role('Moderation Logs', 0n, [DIM]);
+  const logs = await f.chan(C.GuildText, 'moderator-log', { permission_overwrites: [own(STRANGER, P.ViewChannel | P.SendMessagesInThreads)] });
+  await bind(f, logs, 'staff_log', mod);
+  await assert.rejects(bind(f, f.category, 'staff_log', mod), { code: 'SERVER_PREPARE_ROOM' });
+  f.api.features = ['COMMUNITY'];
+  f.api.onboarding.prompts = [{ options: [{ role_ids: [mod.id] }] }];
+  await assert.rejects(f.prepare(), { code: 'SERVER_ONBOARDING_ROLE' });
+  f.api.onboarding.prompts = [];
+  await apply(f, await f.prepare());
+  assert.equal(await access(f, logs, DIM, P.ViewChannel | P.ReadMessageHistory), true);
+  for (const bit of [P.SendMessages, P.SendMessagesInThreads, P.CreatePrivateThreads, P.AddReactions, P.UseApplicationCommands]) {
+    assert.equal(await access(f, logs, DIM, bit), false);
+  }
+  for (const by of [MEMBER_ID, STRANGER, MOD_ID]) assert.equal(await access(f, logs, by), false);
+  assert.equal(messagesAt(f, logs.id).length, 0);
+});
+
+test('ticket preflight requires guild-level overwrite and closing permissions, not just category allowances', async () => {
+  const f = await system();
+  const role = f.api.roles.find((r) => r.id === BOT_ROLE_ID);
+  const full = BigInt(role.permissions);
+  f.api.channel(f.category.id).permission_overwrites = [own(BOT_ID, P.EmbedLinks | P.ManageRoles)];
+  for (const key of ['EmbedLinks', 'ManageRoles']) {
+    role.permissions = String(full & ~P[key]);
+    await assert.rejects(f.prepare(), { code: 'ADMIN_BOT_PERMISSION', message: new RegExp(`رول البوت.*${key}`) });
+  }
+  await f.room('ticket_panel', f.panel);
+  await f.room('ticket_category', f.category);
+  await f.team('support', { withRole: f.supportRole });
+  await f.enable();
+  const baseline = f.api.writes.length;
+  await assert.rejects(f.admin.ticket.open(f.make({ by: MEMBER_ID }), { type: 'site' }), { code: 'ADMIN_BOT_PERMISSION' });
+  assert.deepEqual((await state(f)).requests, {});
+  assert.equal(f.api.writes.length, baseline);
 });

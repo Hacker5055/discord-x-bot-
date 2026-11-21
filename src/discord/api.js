@@ -131,19 +131,9 @@ export class DiscordApi {
   async createWebhook(channelId, data, recover) {
     return webhookMetadata(await this.#request('POST', `/channels/${channelId}/webhooks`, data, recover));
   }
-  async updateWebhook(webhookId, data) {
-    return webhookMetadata(await this.#request('PATCH', `/webhooks/${webhookId}`, data));
-  }
-  async deleteWebhook(webhookId) {
-    try {
-      await this.#request('DELETE', `/webhooks/${webhookId}`);
-    } catch (error) {
-      if (!(error instanceof DiscordApiError && error.status === 404)) throw error;
-    }
-  }
   getMessage(channelId, messageId) { return this.#request('GET', `/channels/${channelId}/messages/${messageId}`); }
   createMessage(channelId, data, options) { return this.#request('POST', `/channels/${channelId}/messages`, data, undefined, options); }
-  editMessage(channelId, messageId, data) { return this.#request('PATCH', `/channels/${channelId}/messages/${messageId}`, data); }
+  editMessage(channelId, messageId, data, options) { return this.#request('PATCH', `/channels/${channelId}/messages/${messageId}`, data, undefined, options); }
   createDm(recipientId, options) { return this.#request('POST', '/users/@me/channels', { recipient_id: recipientId }, undefined, options); }
   registerGuildCommands(applicationId, guildId, commands) {
     return this.#request('PUT', `/applications/${applicationId}/guilds/${guildId}/commands`, commands);

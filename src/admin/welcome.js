@@ -1,4 +1,4 @@
-import { escapeMarkdown, PermissionFlagsBits as P } from 'discord.js';
+import { ChannelType as C, escapeMarkdown, PermissionFlagsBits as P } from 'discord.js';
 import { SITE_ORIGIN } from '../community/anime.js';
 import { DAY } from '../community/time.js';
 import { linkButton, row } from '../community/ui.js';
@@ -19,8 +19,10 @@ const social = {
 export const SOCIAL_PLATFORMS = Object.keys(social);
 const welcomeConfig = () => new AppError('WELCOME_CONFIG', 'اضبط روم الترحيب واسم المالك ونص الرسالة باستخدام /welcome configure الأول.');
 const welcomeIntent = () => new AppError('WELCOME_GATEWAY', 'فعّل Server Members Intent ثم اضبط BX_WELCOME=1 على تطبيق البوت.');
-const rolesUnsafe = () => new AppError('ONBOARDING_ROLE', 'اختار Members وBoy وGirl نفسهم كرولات مختلفة، بدون صلاحيات أو أذونات رومات أو تفويض.');
-const joinRoleExpected = { members: 'Members', boy: 'Boy', girl: 'Girl' };
+const rolesUnsafe = () => new AppError('ONBOARDING_ROLE', 'اختار ٣ رولات مختلفة لـ members وboy وgirl، أو سيبهم كلهم فاضيين لفحص Onboarding العام. الأسماء الظاهرة مش شرط.');
+const joinRoleKeys = ['members', 'boy', 'girl'];
+const DEFAULT_TEXT = [...TEXT_ROOMS, C.GuildForum, C.GuildMedia];
+const productLike = (name) => /^(?:black\s*x|vip\b|creator\b)/iu.test(name.replace(/^[^\p{L}\p{N}]+/u, ''));
 const MAX_WELCOME_RECEIPTS = 512;
 
 function profileLink(platform, value, redact) {
@@ -66,6 +68,25 @@ function isJoinPrompt(prompt, roleIds) {
   const sets = prompt.options.map((option) => [...option.role_ids].sort().join(','));
   const [members, boy, girl] = roleIds;
   return [[members], [members, boy], [members, girl]].every((ids) => sets.includes(ids.sort().join(',')));
+}
+
+function selfSelectableRole(c, w, a, id) {
+  const role = c.ordinaryRole(w, a, id, { manageable: false });
+  if (productLike(role.name)) throw new AppError('ONBOARDING_ROLE', 'رول BLACK X أو VIP أو Creator مش للاختيار الذاتي.');
+  return role;
+}
+
+function defaultChannelLines(c, w, current) {
+  const ids = [...new Set(current.default_channel_ids)];
+  const channels = ids.map((id) => w.channels.find((ch) => ch.id === id && (!ch.guild_id || ch.guild_id === c.guildId)));
+  const publicChat = channels.filter((ch) => ch && DEFAULT_TEXT.includes(ch.type) &&
+    hasPermission(c.bits(w, ch, c.guildId, { roles: [] }), P.ViewChannel | P.SendMessages)).length;
+  const unknown = channels.filter((ch) => !ch).length;
+  return [`رومات Onboarding الافتراضية: ${ids.length} · منها ${publicChat} روم نصّي ظاهر ومفتوح لـ @everyone في الفحص.`,
+    ...(unknown ? [`⚠ البوت مش شايف ${unknown} من الرومات الافتراضية؛ راجعها في Discord.`] : []),
+    ...(current.mode === 0 && (ids.length < 7 || publicChat < 5)
+      ? ['⚠ في وضع الإعداد الافتراضي راجع شرط Discord: ٧ رومات افتراضية، منها ٥ مفتوحة لـ @everyone. ما تفتحش رومات الإدارة عشان تكمل العدد.'] : []),
+    ...(current.mode === 1 ? ['Advanced Mode بيحسب الاختيارات كمان؛ راجع النتيجة في Preview بتاع Discord.'] : [])];
 }
 
 export function welcomeActions(c) {
@@ -122,37 +143,39 @@ export function welcomeActions(c) {
       const state = c.config.welcomeGateway && welcome.enabled ? 'مفعّل' : 'متوقف';
       return { content: `معاينة خاصة · الوجهة: ${roomRef(welcome.channelId)} · الترحيب ${state}.`, ...welcomeCard(welcome, by) };
     },
-    async onboarding(i, selected) {
+    async onboarding(i, selected = {}) {
       const by = await c.owner(i);
       const [w, state] = await Promise.all([c.world(), c.read()]);
       if (w.guild.owner_id !== by) throw ownerRequired();
       const a = adminOf(state);
-      const ids = Object.keys(joinRoleExpected).map((key) => idOf(selected[key]?.id));
+      const requested = joinRoleKeys.map((key) => selected[key]);
+      if (requested.some(Boolean) && !requested.every(Boolean)) throw rolesUnsafe();
+      const ids = requested.every(Boolean) ? requested.map((role) => idOf(role.id)) : [];
       if (new Set(ids).size !== ids.length) throw rolesUnsafe();
-      for (const [index, name] of Object.values(joinRoleExpected).entries()) {
-        const role = c.ordinaryRole(w, a, ids[index], { manageable: false });
-        if (role.name.trim().toLowerCase() !== name.toLowerCase()) throw rolesUnsafe();
-      }
+      ids.forEach((id) => selfSelectableRole(c, w, a, id));
       // Read native onboarding; never overwrite the server's questions/default channels or assign roles ourselves.
       const current = await c.api.getOnboarding(c.guildId);
-      if (current?.guild_id !== c.guildId || typeof current.enabled !== 'boolean' || !Array.isArray(current.prompts) ||
+      if (current?.guild_id !== c.guildId || typeof current.enabled !== 'boolean' || !Array.isArray(current.default_channel_ids) ||
+        !current.default_channel_ids.every(isSnowflake) || !Array.isArray(current.prompts) ||
         !current.prompts.every((p) => Array.isArray(p.options) && p.options.every((o) => Array.isArray(o.role_ids)))) {
         throw new AppError('ONBOARDING_UNAVAILABLE', 'تعذّر تأكيد إعداد Discord Onboarding. راجعه من Server Settings.', 502);
       }
-      const matching = current.prompts.some((p) => isJoinPrompt(p, ids));
+      const matching = ids.length > 0 && current.prompts.some((p) => isJoinPrompt(p, ids));
       let otherRisk = false;
       for (const id of new Set(current.prompts.flatMap((p) => p.options.flatMap((o) => o.role_ids)))) {
-        try {
-          const role = c.ordinaryRole(w, a, id, { manageable: false });
-          if (/^(?:black\s*x|vip(?:\s|$)|creator(?:\s|$))/iu.test(role.name.trim())) otherRisk = true;
-        } catch (error) { if (!(error instanceof AppError)) throw error; otherRisk = true; }
+        try { selfSelectableRole(c, w, a, id); }
+        catch (error) { if (!(error instanceof AppError)) throw error; otherRisk = true; }
       }
       return [`Discord Onboarding: ${current.enabled ? 'مفعّل' : 'متوقف'} · ${current.prompts.length} سؤال.`,
-        matching ? 'فيه سؤال دخول باختيار واحد مطابق لتوزيع الرولات.' : 'لسه مفيش سؤال دخول مطابق لتوزيع الرولات.',
+        ...defaultChannelLines(c, w, current),
+        ...(Array.isArray(w.guild.features) ? [
+          `Rules Screening: ${w.guild.features.includes('MEMBER_VERIFICATION_GATE_ENABLED') ? 'مفعّل' : 'مش مفعّل'}؛ مستقل عن رسالة القوانين.`,
+        ] : []),
+        ...(ids.length ? [matching ? 'فيه سؤال دخول باختيار واحد مطابق لتوزيع الرولات.' : 'لسه مفيش سؤال دخول مطابق لتوزيع الرولات.',
+          'لو هتعمل السؤال ده، سيب خيار تخطّي: Boy → Members + Boy | Girl → Members + Girl | تخطّي → Members فقط. المسميات في الأمر أدوار في السؤال، مش أسماء لازم تغيّرها.'] : []),
         ...(otherRisk ? ['⚠️ في أسئلة فيها رولات غير آمنة للاختيار الذاتي؛ راجعها قبل التفعيل.'] : []),
-        'في Server Settings → Onboarding، أضف سؤال «تحب يظهر أي رول بجانب اسمك؟»؛ اختيار واحد، مطلوب، وAsk before a member joins.',
-        `Boy → Members + Boy | Girl → Members + Girl | تخطّي → Members فقط. سيب BLACK X وVIP وCreator ورولات الفرق خارج الاختيارات.`,
-        'قراءة ومعاينة فقط. Discord هو اللي يطرح السؤال ويعيّن الرول؛ البوت مش هيغيّر الـOnboarding أو الدعوات.'];
+        'سيب BLACK X وVIP وCreator ورولات الفرق خارج الاختيارات. راجع توزيع الرومات من Server Settings → Onboarding.',
+        'ده فحص قراءة بس. Discord هو اللي يطرح السؤال ويعيّن الرول؛ البوت مش هيغيّر الـOnboarding أو الدعوات.'];
     },
     async join(event) {
       const { id, guild, user, joinedTimestamp, pending } = event;

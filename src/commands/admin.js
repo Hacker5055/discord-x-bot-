@@ -128,8 +128,9 @@ export const adminCommands = [
       text('url', 'رابط HTTPS مباشر للبروفايل', 300, false)),
     r('preview', 'عاين ترحيبك في رد خاص من غير إرسال في الروم'),
     r('enable', 'فعّل أو أوقف الترحيب بالأعضاء الجدد', bool('enabled', 'حالة الترحيب', true)),
-    r('onboarding', 'افحص رولات أسئلة Discord Onboarding الحالية من غير تعديل',
-      option('Role', 'members', 'رول Members الآمن'), option('Role', 'boy', 'رول Boy الآمن'), option('Role', 'girl', 'رول Girl الآمن')),
+    r('onboarding', 'افحص رومات وأسئلة Discord Onboarding الحالية من غير تعديل',
+      option('Role', 'members', 'اختياري: رول العضوية الآمن', undefined, false), option('Role', 'boy', 'اختياري: رول اختيار Boy', undefined, false),
+      option('Role', 'girl', 'اختياري: رول اختيار Girl', undefined, false)),
   ], { owner: true }),
   command('idea', 'اقتراحات BLACK X وتصويت ومراجعة', 'idea', [
     r('add', 'سجّل اقتراح في الروم المضبوط', title(), text('note', 'تفاصيل مختصرة', 300)),

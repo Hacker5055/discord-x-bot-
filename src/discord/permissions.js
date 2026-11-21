@@ -6,6 +6,7 @@ export const PERMISSION = Object.freeze({
   SendMessages: 2048n,
   ManageMessages: 8192n,
   EmbedLinks: 16384n,
+  ReadMessageHistory: 65536n,
   ManageRoles: 268435456n,
   ManageWebhooks: 536870912n,
 });

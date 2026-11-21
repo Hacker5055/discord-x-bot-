@@ -1,6 +1,12 @@
 name: Deploy BLACK X to Heroku
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      expected_app:
+        description: 'Confirm the configured Heroku app name (optional)'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -21,12 +27,17 @@ jobs:
     environment: black-x-production
     env:
       HEROKU_APP_NAME: ${{ vars.HEROKU_APP_NAME }}
+      EXPECTED_HEROKU_APP: ${{ inputs.expected_app }}
     steps:
       - name: Validate Heroku app name
         shell: bash
         run: |
           if ! [[ "$HEROKU_APP_NAME" =~ ^[a-z][a-z0-9-]{1,28}[a-z0-9]$ ]]; then
             echo '::error::Set a valid HEROKU_APP_NAME (app name, not URL) in the black-x-production environment.'
+            exit 1
+          fi
+          if [[ -n "$EXPECTED_HEROKU_APP" && "$HEROKU_APP_NAME" != "$EXPECTED_HEROKU_APP" ]]; then
+            echo '::error::The configured Heroku app does not match expected_app. Nothing was deployed.'
             exit 1
           fi
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -50,10 +61,10 @@ jobs:
 
           heroku_api() {
             printf 'Authorization: Bearer %s\n' "$HEROKU_API_KEY" | \
-              curl --disable --fail --silent --show-error --proto '=https' --max-time 90 --header @- "$@"
+              curl --disable --silent --show-error --proto '=https' --max-time 90 --header @- "$@"
           }
 
-          if ! heroku_api --header 'Accept: application/vnd.heroku+json; version=3' \
+          if ! heroku_api --fail --header 'Accept: application/vnd.heroku+json; version=3' \
             "https://api.heroku.com/apps/$HEROKU_APP_NAME" | \
             jq -e '.stack.name == "container" or .build_stack.name == "container"' >/dev/null; then
             echo '::error::Could not verify the app. Check the deploy account access, app name, and container stack (Cedar).'
@@ -73,16 +84,22 @@ jobs:
             exit 1
           fi
           payload=$(jq -cn --arg image "$image_id" '{updates: [{type: "web", docker_image: $image}]}')
+          release_response="$DOCKER_CONFIG/release-response.json"
           if ! status=$(heroku_api --request PATCH \
             --header 'Accept: application/vnd.heroku+json; version=3.docker-releases' \
             --header 'Content-Type: application/json' --data-binary "$payload" \
-            --output /dev/null --write-out '%{http_code}' \
+            --output "$release_response" --write-out '%{http_code}' \
             "https://api.heroku.com/apps/$HEROKU_APP_NAME/formation"); then
-            echo '::error::Heroku rejected the web release. Check the app Activity and deploy account.'
+            echo '::error::No complete response from Heroku. Check app Activity before retrying the release.'
             exit 1
           fi
           if ! [[ "$status" =~ ^2[0-9]{2}$ ]]; then
-            echo '::error::Heroku did not accept the release.'
+            [[ "$status" =~ ^[0-9]{3}$ ]] || status=000
+            # Do not echo a response body or arbitrary upstream strings into the Actions log.
+            error_id=$(jq -er '.id | select(. == "not_found" or . == "unauthorized" or . == "forbidden" or
+              . == "invalid_params" or . == "unprocessable_entity" or . == "rate_limit")' \
+              "$release_response" 2>/dev/null) || error_id=unknown
+            printf '::error::Heroku rejected the web release (HTTP %s, %s). Check app Activity and deploy access.\n' "$status" "$error_id"
             exit 1
           fi
-          echo 'Heroku accepted the web release. Check Heroku dyno logs for gateway_ready.'
+          echo "Heroku accepted the web release for $GITHUB_SHA. Check dyno logs for gateway_ready."

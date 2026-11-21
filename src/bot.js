@@ -1,5 +1,5 @@
 import { Client, Events, GatewayIntentBits, MessageFlags, Status } from 'discord.js';
-import { adminUnavailable } from './admin/index.js';
+import { adminUnavailable, opensAdminForm, submitsAdminForm } from './admin/index.js';
 import { commands } from './commands/index.js';
 import { communityButton } from './commands/community.js';
 import { NO_MENTIONS } from './community/ui.js';
@@ -29,7 +29,7 @@ export function createInteractionHandler(dependencies) {
   return async (interaction) => {
     const chat = interaction.isChatInputCommand?.();
     const button = interaction.isButton?.() && interaction.customId?.startsWith('bx:');
-    const modal = interaction.isModalSubmit?.() && /^bx:x:complaint:[0-9]{17,20}$/.test(interaction.customId);
+    const modal = interaction.isModalSubmit?.() && submitsAdminForm(interaction.customId);
     const autocomplete = interaction.isAutocomplete?.();
     if (!chat && !button && !modal && !autocomplete) return;
     const command = commands.get(interaction.commandName);
@@ -50,9 +50,9 @@ export function createInteractionHandler(dependencies) {
         throw new AppError('GUILD_NOT_ALLOWED', 'البوت مخصص لسيرفر BLACK X الرسمي فقط.', 403);
       }
       if (chat && !command) throw new AppError('UNKNOWN_COMMAND', 'الأمر غير معروف. أعد تسجيل أوامر السيرفر.');
-      if (button && interaction.customId === 'bx:x:complaint:open') {
+      if (button && opensAdminForm(interaction.customId)) {
         if (!dependencies.admin) throw adminUnavailable();
-        await interaction.showModal(dependencies.admin.complaintForm(interaction));
+        await interaction.showModal(dependencies.admin.form(interaction));
         return;
       }
       if (button && (interaction.customId.startsWith('bx:a:') || interaction.customId.startsWith('bx:x:train:'))) {

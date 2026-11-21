@@ -5,16 +5,16 @@
 ## ١. إضافة البوت إلى Discord
 
 1. افتح [Discord Developer Portal](https://discord.com/developers/applications) → **New Application** واكتب `BLACK X Bot`. انسخ **Application ID** من **General Information**.
-2. في **Bot** اضغط **Reset Token** واحفظه محليًا في `.env` أو في مدير الأسرار فقط. أطفئ **Requires OAuth2 Code Grant**، وأطفئ **Public Bot** إذا كنت لا تريد أن يضيفه أحد غيرك. إن منعك Discord من إطفاء **Public Bot** بسبب رابط التثبيت الافتراضي، اختر **Installation → Install Link → None** أولًا. البوت يستخدم `Guilds` افتراضيًا؛ الصوت وAutoMod اختياريان بدون Privileged Intents. لا تفعّل **Server Members Intent** إلا لو هتشغّل الترحيب الاختياري، و**Message Content Intent** مش مطلوب لأي ميزة هنا.
+2. في **Bot** اضغط **Reset Token** واحفظه محليًا في `.env` أو في مدير الأسرار فقط. أطفئ **Requires OAuth2 Code Grant**، وأطفئ **Public Bot** إذا كنت لا تريد أن يضيفه أحد غيرك. إن منعك Discord من إطفاء **Public Bot** بسبب رابط التثبيت الافتراضي، اختر **Installation → Install Link → None** أولًا. البوت يستخدم `Guilds` افتراضيًا؛ الصوت وAutoMod اختياريان بدون Privileged Intents. **Server Members Intent** مطلوب لحصر فريق الدعم في تنبيهات الشكاوى بالخاص أو للترحيب الاختياري. مش مطلوب لو هتكتفي بصندوق الفريق وتنبيه المالك. **Message Content Intent** مش مطلوب.
 3. استبدل `CLIENT_ID` بـ **Application ID** في الرابط التالي. افتحه بحساب مخوّل بإضافة التطبيقات واختر **السيرفر الرسمي فقط**:
 
    ```text
-   https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&scope=bot%20applications.commands&permissions=805309456
+   https://discord.com/oauth2/authorize?client_id=CLIENT_ID&scope=bot%20applications.commands&permissions=268520464
    ```
 
-   الرابط يطلب `View Channel` و`Send Messages` و`Manage Channels` و`Manage Roles` و`Manage Webhooks`، وليس `Administrator`. نشر الكروت يحتاج أيضًا `Embed Links`: لو `/status` قال إنها ناقصة، فعّلها على رول البوت (ولا تغيّر الـ overwrites المحددة للرومات). لا تعطِ البوت `Administrator` أو `Kick/Ban`.
+   الرابط يطلب `View Channel` و`Send Messages` و`Read Message History` و`Embed Links` و`Manage Channels` و`Manage Roles`. `Manage Webhooks` اختياري للويب هوكات الأصلية فقط، ويفضّل منحه في الرومات اللي محتاجاه. لإعداد أول مرة بالويب هوكات يمكن استخدام `permissions=805391376`، ثم حصرها في الرومات. لو البوت موجود، عدّل صلاحيات روله بدل إعادة دعوته. لا تعطِه `Administrator` أو `Kick/Ban`. راجع [خريطة الصلاحيات](docs/server-design.md#رول-البوت-وصلاحياته).
 4. من **Server Settings → Widget → Enable Server Widget** انسخ **Server ID** الظاهر في الإعدادات أو المعرّف في رابط Widget API. يمكنك إطفاء الـ Widget بعد النسخ. البديل: فعّل **User Settings → Advanced → Developer Mode**، ثم اضغط بزر الفأرة الأيمن على أيقونة السيرفر → **Copy Server ID**. انسخ أيضًا **User ID** لمالك السيرفر الفعلي باستخدام **Copy User ID**.
-5. من **Server Settings → Roles** حرّك رول البوت فوق رولات BLACK X. لا يمكن للبوت أن يرفع روله بنفسه أو يعدّل رولًا مساويًا له أو أعلى منه.
+5. من **Server Settings → Roles** حرّك رول البوت فوق رولات المنتج اللي بيديرها (VIP وCreator) ورولات الوصول اللي هيستخدمها التجهيز. خلّي رولات الإدارة بصلاحيات عامة أعلى منه؛ دور دعم بسيط يكفي للتذاكر. البوت لا يرفع روله بنفسه.
 
 ## ٢. تشغيل محلي
 
@@ -64,7 +64,7 @@ node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("h
 
 التذاكر الخاصة، صندوق الفريق وسجله، المراجعات والاستئناف، أجندة الفعاليات والانتظار وإدارة الوصول المؤقت. راجع [دليل التفعيل والصلاحيات والأوامر الـ٢٨](docs/administration.md). الأدوات لا تنفّذ تغييرات لمجرد تسجيل الأوامر؛ المالك يفعّلها ويضبط النطاق. `/announce preview:true` يفتح معاينة خاصة، و`/status integration:true` يبيّن استقبال الكتالوج دون تشغيل مزامنة.
 
-[تجهيز الرومات والقوانين واستقبال الشكاوى](docs/server-prepare.md): أمر `/server prepare` للمالك يعرض الأذونات قبل التطبيق، ويجهّز لوحة الشكاوى الخاصة وصندوق الفريق. القوانين تتعدّل في نفس الرسالة بـ`/rules`.
+[تصميم سيرفر BLACK X ورول البوت](docs/server-design.md) · [تجهيز الرومات والقوانين واستقبال الشكاوى](docs/server-prepare.md): أمر `/server prepare` للمالك يعرض الأذونات قبل التطبيق، ويجهّز لوحة الشكاوى الخاصة وصندوق الفريق. القوانين تتعدّل في نفس الرسالة بـ`/rules`.
 
 ### الترحيب والربط بين حساب الموقع وديسكورد
 
@@ -81,7 +81,7 @@ node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("h
 | `creators` | 🎬-صنّاع-المحتوى | متاحة |
 | `offers` | 🎁-العروض-والخصومات | قراءة فقط |
 
-يطبّق الأمر الـ permission overwrites المحددة على **هذه الرومات** بدل أي overwrites قديمة. في رومات القراءة فقط: `@everyone` له `allow=1024` و`deny=2048`، والبوت له `allow=3072` و`deny=0`. الأعضاء الذين لديهم `Administrator` أصلًا يتجاوزون overwrites بحكم Discord؛ البوت لا يمنح هذه الصلاحية.
+دي الأذونات الابتدائية **للرومات الجديدة فقط**. في رومات القراءة فقط: `@everyone` له `allow=1024` و`deny=2048`، والبوت له `allow=3072` و`deny=0`. الأعضاء الذين لديهم `Administrator` أصلًا يتجاوزون overwrites بحكم Discord؛ البوت لا يمنح هذه الصلاحية.
 
 | مفتاح الرول | الاسم | اللون |
 |---|---|---|
@@ -93,8 +93,8 @@ node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("h
 
 ### تكرار الإعداد والويب هوكات
 
-- مطابقة الروم بعلامة الـ topic مثل `[BLACK X · updates]` وليس بالاسم. الكاتيجوري والرولات تُطابق بالاسم افتراضيًا. معرّفات `DISCORD_CHANNEL_*` و`DISCORD_ROLE_*` في `.env` لها أولوية إذا كانت موارد صالحة في نفس السيرفر. لا تُحذف رومات أو رولات قديمة عند وجود تطابقات مبهمة؛ يظهر تحذير.
-- لكل روم Incoming Webhook واحد باسم `BLACK X Bot`. بدون `DISCORD_WEBHOOK_*`، يعيد الأمر إنشاء ويب هوك BLACK X بعد إزالة النسخ القديمة؛ **الروابط القديمة تتوقف عن العمل**. لا يتعرض لويب هوكات التطبيقات الأخرى أو التي لا تطابق الاسم. لو ضبطت معرّف الويب هوك، يعيد استخدامه وينظّف التكرارات. بعد تثبيت المعرّفات، إعادة `/setup` على موارد مطابقة لا تكتب أي تغييرات.
+- مطابقة الروم بعلامة الـ topic مثل `[BLACK X · updates]` وليس بالاسم. الكاتيجوري والرولات تُطابق بالاسم افتراضيًا. معرّفات `DISCORD_CHANNEL_*` و`DISCORD_ROLE_*` في `.env` لها أولوية إذا كانت موارد صالحة في نفس السيرفر. لو الروم موجود، الإعداد يحافظ على اسمه ومكانه وأذوناته، ويضيف علامة الربط عند الحاجة فقط. لو سمّيت الكاتيجوري الأصلية باسم مختلف، ثبّت معرّفها في `DISCORD_CHANNEL_CATEGORY`.
+- مع إذن `Manage Webhooks`، `/setup` يستخدم الـIncoming Webhook المضبوط لمعرف الروم، أو النسخة الوحيدة باسم `BLACK X Bot`. لو مفيش نسخة يقدر ينشئها. لو فيه أكتر من نسخة بالاسم من غير ID صالح، يطلب تثبيت **معرّف النسخة اللي التطبيق بيستخدمها**. مفيش حذف ولا تدوير تلقائي ولا تغيير لاسم ويب هوك موجود؛ الروابط الحالية تفضل كما هي. راجع واعتمد أي تنظيف يدوي بعد التأكد من المرسل اللي بيستخدم كل رابط.
 - بلوك `DISCORD_*` في الرد يحتوي **معرّفات** لا توكنات. انسخ منه القيم غير الفارغة إلى `.env` وأعد تشغيل البوت. للحصول على الرابط العامل عند الحاجة: **Edit Channel → Integrations → Webhooks → BLACK X Bot → Copy Webhook URL**. خزّن الرابط كسر في التطبيق الذي سيرسل الإعلانات، وأرسل `allowed_mentions: { "parse": [] }` معه لمنع التنبيهات. `DISCORD_WEBHOOK_*` يقبل ID أو رابط Discord، لكن البوت يستخدم الـ ID فقط؛ الأفضل حفظ الـ ID للبوت وعدم مشاركة الرابط.
 
 ## ٤. تكامل خادم الموقع
@@ -191,7 +191,7 @@ gcloud run deploy black-x-bot --source . --project="$PROJECT_ID" --region="$REGI
 | الأوامر لا تظهر | استخدم رابط التثبيت بنطاق `applications.commands`، ثم شغّل `npm run register`، وتأكد من `DISCORD_GUILD_ID` والأذونات الافتراضية للأمر. |
 | البوت يظهر Offline | راجع سجل JSON و`/health` بالسر. على Heroku تحقق أن `web` واحد شغّال على Basic أو Standard. على Cloud Run تحقق من `min-instances=1` و`--no-cpu-throttling`، وعلى Fly أوقف الإيقاف التلقائي. |
 | رول البوت منخفض | افتح **Server Settings → Roles** وارفع أعلى رول للبوت فوق كل رولات BLACK X، ثم أعد `/setup`. البوت لا يرفع روله بنفسه. |
-| الويب هوك القديم لا يعمل | بعد تدوير الويب هوك، انسخ رابط النسخة الحالية من Integrations وحدّث سر التطبيق المرسل. ثبّت ID في `DISCORD_WEBHOOK_*` إن أردت الاحتفاظ بالرابط بين تشغيلات `/setup`. |
+| الويب هوك القديم لا يعمل | افحص `/status` و**Integrations**. لو الرابط كان اتحذف قبل كده، حدّث تطبيق الإرسال بالرابط العامل بشكل خاص. `/setup` مش بيعطّل روابط موجودة؛ لو فيه نسخ متكررة ثبّت ID النسخة المستخدمة في `DISCORD_WEBHOOK_*`. |
 
 ## ٧. الاختبارات والملفات
 

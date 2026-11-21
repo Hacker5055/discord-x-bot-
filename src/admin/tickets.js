@@ -4,15 +4,14 @@ import { SITE_ORIGIN } from '../community/anime.js';
 import { button, linkButton, row } from '../community/ui.js';
 import { hasPermission } from '../discord/permissions.js';
 import { isSnowflake } from '../lib/catalog.js';
-import { AppError, DiscordApiError } from '../lib/errors.js';
+import { AppError, DiscordApiError, errorFields } from '../lib/errors.js';
 import { assertBridge, bridgeEnabled, siteSession } from '../site/session.js';
-import { adminOf, audit, card, denied, fixedChoice, idOf, isMissing, live, nonce, notFound, onboardingRoleName, post, roomRef, stale, TEXT_ROOMS } from './core.js';
+import { checkTicketCategory, TICKET_ACCESS, TICKET_BOT } from './channel-plan.js';
+import { adminOf, audit, card, denied, fixedChoice, idOf, isMissing, live, memberRef, nonce, notFound, onboardingRoleName, post, roomRef, stale, TEXT_ROOMS } from './core.js';
 import { COMPLAINT_CARD, complaintActions, complaintScope, queueComplaint } from './complaints.js';
-import { duplicate, kindAt, setRecord } from './records.js';
+import { detailLines, duplicate, kindAt, setRecord, stages } from './records.js';
 
 const TICKET_MARK = 'bx-ticket:';
-const TICKET_ACCESS = P.ViewChannel | P.SendMessages | P.ReadMessageHistory;
-const TICKET_BOT = TICKET_ACCESS | P.EmbedLinks;
 const MAX_SHARED_PER_TICKET = 40;
 const MAX_SHARED_BYTES = 384 * 1024;
 const overwrite = (id, type, allow, deny = 0n) => ({ id, type, allow: String(allow), deny: String(deny) });
@@ -98,8 +97,29 @@ function openSettings(c, s) {
   if (!supportRole || c.productRole(s.w, supportRoleId) || onboardingRoleName(supportRole.name)) {
     throw new AppError('ADMIN_TICKET_CONFIG', 'اطلب من الإدارة ضبط رول مستقل لفريق الدعم الأول.');
   }
-  c.botNeeds(s.w, category, P.ViewChannel, P.ManageChannels, P.ManageRoles, P.SendMessages, P.ReadMessageHistory, P.EmbedLinks);
+  checkTicketCategory(c, s.w, category);
   return { category, supportRoleId };
+}
+
+const caseButtonId = (action, id) => `bx:x:case:${action}:${id}`;
+const caseTypes = { site: 'مشكلة في الموقع', report: 'بلاغ أو شكوى' };
+const caseColors = { opening: 0x9B59B6, open: 0x9B59B6, claimed: 0x3498DB, closed: 0x7F8C8D };
+const caseEmbed = (r) => ({ title: '🎫 تذكرة BLACK X', color: caseColors[r.status],
+  fields: [{ name: 'رقم التذكرة', value: `\`${r.id}\`` }, { name: 'النوع', value: caseTypes[r.type], inline: true },
+    { name: 'الحالة', value: stages[r.status], inline: true }], timestamp: new Date(r.openedAt ?? r.at).toISOString() });
+
+function intakeCard(r) {
+  const description = r.closedAt ? 'التذكرة اتقفلت من غير حذف. تقدر ترجع للرسائل هنا.' : [
+    r.type === 'site' ? 'اكتب اسم الصفحة والمشكلة اللي ظهرت، وإيه الخطوات اللي حصلت قبلها.' : 'لو التفاصيل مش مكتوبة تحت البطاقة، اكتبها هنا في الروم الخاص.',
+    'تابع رد فريق الدعم هنا، ومتكتبش كلمة سر أو توكن.',
+  ].join('\n');
+  return { embeds: [{ ...caseEmbed(r), description }] };
+}
+
+function ticketForm(customId, title, field, label, description, maxLength, style = TextInputStyle.Paragraph) {
+  return new ModalBuilder().setTitle(title).setCustomId(customId)
+    .addLabelComponents(new LabelBuilder().setLabel(label).setDescription(description)
+      .setTextInputComponent(new TextInputBuilder().setCustomId(field).setStyle(style).setMaxLength(maxLength).setRequired(true)));
 }
 
 export function ticketActions(c) {
@@ -107,6 +127,27 @@ export function ticketActions(c) {
     const room = stableTicket(c, w, r);
     return room && !room.archived;
   });
+  async function syncCard(s, r, { first = false } = {}) {
+    if (!r.channelId || (!first && !r.cardMessageId)) return;
+    try {
+      const fresh = await freshTicket(c, s, r);
+      if (!fresh || fresh.archived !== Boolean(r.closedAt)) return;
+      c.postNeeds(s.w, fresh.ch);
+      await c.assertCurrent(s);
+      if (!first) {
+        await c.api.editMessage(r.channelId, r.cardMessageId, post(intakeCard(r)), { guarded: true });
+        return;
+      }
+      // The opening record is already saved. Never re-post a card after a lost acknowledgement.
+      const message = await c.api.createMessage(r.channelId, post(intakeCard(r), `ticket-header:${r.id}`), { guarded: true });
+      if (!isSnowflake(message?.id) || (message.channel_id && message.channel_id !== r.channelId)) throw stale();
+      await c.edit((a) => { kindAt(a, r.id, 'ticket').cardMessageId = message.id; }, s);
+    } catch (error) {
+      // A missing header isn't a failed open/claim/close. Staff detail still reads the current record.
+      c.log.warn('ticket_card_not_updated', errorFields(error));
+    }
+  }
+
   async function open(by, type, getSession, { interaction, fromCard, complaintPanel, requestId } = {}) {
     fixedChoice(['site', 'report'], type);
     return c.serial(`ticket-user:${by}`, async () => {
@@ -169,6 +210,7 @@ export function ticketActions(c) {
           queueComplaint(c, admin, record, { fromForm: Boolean(complaintPanel) });
           return record;
         });
+        await syncCard(s, saved, { first: true });
         return { s: { ...s, w: { ...s.w, channels: [...s.w.channels.filter((ch) => ch.id !== room.id), room] } }, r: saved };
       });
     });
@@ -197,6 +239,7 @@ export function ticketActions(c) {
         }
         return current;
       }, s);
+      if (record.status !== r.status) await syncCard(s, record);
       return { s, r: record };
     });
   }
@@ -226,6 +269,7 @@ export function ticketActions(c) {
         audit(a, 'support', 'ticket_closed', s.by, id, c.now());
         return current;
       }, mayArchive ? undefined : s);
+      if (room) await syncCard(s, record);
       const channels = s.w.channels.filter((ch) => ch.id !== r.channelId && ch.id !== observed?.ch.id);
       if (room) channels.push(room.ch);
       return { s: { ...s, w: { ...s.w, channels } }, r: record };
@@ -257,9 +301,15 @@ export function ticketActions(c) {
       if (!hasPermission(c.bits(s.w, ch, s.by, s.member), P.SendMessages)) throw denied();
       c.postNeeds(s.w, ch);
       const title = staff ? 'رد من دعم BLACK X' : 'رسالة صاحب التذكرة';
-      if (!shared) {
+      async function recheckDestination() {
+        const fresh = await freshTicket(c, s, r);
+        if (!fresh || fresh.archived || !hasPermission(c.bits(s.w, fresh.ch, s.by, s.member), P.SendMessages)) throw stale();
+        c.postNeeds(s.w, fresh.ch);
         await c.assertCurrent(s);
-        await c.api.createMessage(ch.id, post(card(title, body), key), { guarded: true });
+      }
+      if (!shared) {
+        await recheckDestination();
+        await c.api.createMessage(ch.id, post(card(title, safeTicketText(body)), key), { guarded: true });
         await c.edit((a) => {
           kindAt(a, id, 'ticket').firstReplyAt ??= c.now();
           audit(a, 'support', 'ticket_replied', s.by, id, c.now());
@@ -292,10 +342,7 @@ export function ticketActions(c) {
       let attempted = false;
       try {
         // Refresh the destination right before posting user text. Do not read any Discord messages.
-        const fresh = await freshTicket(c, s, r);
-        if (!fresh || fresh.archived || !hasPermission(c.bits(s.w, fresh.ch, s.by, s.member), P.SendMessages)) throw stale();
-        c.postNeeds(s.w, fresh.ch);
-        await c.assertCurrent(s);
+        await recheckDestination();
         attempted = true;
         const sent = await c.api.createMessage(ch.id, post(card(`${title} · مشترك مع الموقع`, safeTicketText(body)), messageId), { guarded: true });
         if (!isSnowflake(sent?.id) || (sent.channel_id && sent.channel_id !== ch.id)) throw new DiscordApiError(502);
@@ -324,7 +371,11 @@ export function ticketActions(c) {
     });
   }
 
-  const discordStaff = (i) => () => c.session(i, { team: 'support' });
+  const discordStaff = (i) => async () => {
+    const s = await c.session(i, { team: 'support' });
+    if (s.member.pending === true) throw denied();
+    return s;
+  };
   const site = (by, options) => () => siteSession(c, by, options);
   const toResult = ({ s, r }, staff) => ({ ticket: summary(c, s, r, staff) });
   const sharedResult = ({ s, r, message }, staff) => ({ ticket: summary(c, s, r, staff), message: visibleMessage(message) });
@@ -337,13 +388,20 @@ export function ticketActions(c) {
         ...(roomId ? { roomId, ownerOnly: true } : {}) });
       if (version !== undefined && s.a.version !== version) throw stale();
       if (s.channel.id !== s.a.rooms.ticket_panel || !s.a.rooms.ticket_category || !s.a.teams.support?.roleId) throw denied();
+      openSettings(c, s);
       c.postNeeds(s.w, s.channel);
       const bridged = bridgeEnabled(c, s.a);
       const complaint = complaintScope(c, s.a);
-      const text = 'اختار نوع الطلب. هتتفتح لك تذكرة خاصة يشوفها فريق الدعم المصرّح له.' +
-        (complaint ? '\nاستخدم «قدّم شكوى» للنموذج الخاص. المالك يوصله نص النموذج على الخاص، وفريق الدعم يوصله رابط التذكرة الخاصة.' : '') +
-        (bridged ? '\nتقدر تتابعها من حسابك المربوط على الموقع. رسائل الروم العادية مش بتتنقل للموقع.' : '');
-      const payload = post({ ...card('🎫 دعم BLACK X', text), components: [row(button('bx:x:ticket:site', 'مشكلة في الموقع', 1),
+      const text = 'اختار المسار المناسب. هتتفتح لك تذكرة خاصة لفريق الدعم المخوّل؛ اكتب التفاصيل هناك، مش في روم عام.\n' +
+        '**تذكرة واحدة مفتوحة لكل عضو.** لو عندك واحدة، كمّل فيها.' +
+        (bridged ? '\nتقدر تتابعها من حسابك المربوط؛ الشات العادي مش بيتنقل للموقع.' : '');
+      const embed = { ...card('🎫 مركز دعم BLACK X', text).embeds[0], fields: [
+        { name: '🛠️ مشكلة في الموقع', value: 'لو حاجة مش شغّالة في صفحة أو حساب أو حلقة.' },
+        { name: complaint ? '📝 قدّم شكوى' : '📝 بلاغ', value: complaint
+          ? 'اكتب في النموذج الخاص. البوت يحاول يوصل نصه للمالك على الخاص ورابط التذكرة لفريق الدعم.'
+          : 'افتح تذكرة خاصة لبلاغ عن مشكلة في السيرفر.' },
+      ], footer: { text: 'ما تبعتش كلمة سر أو توكن.' } };
+      const payload = post({ embeds: [embed], components: [row(button('bx:x:ticket:site', 'مشكلة في الموقع', 1),
         complaint ? button('bx:x:complaint:open', 'قدّم شكوى', 2) : button('bx:x:ticket:report', 'بلاغ', 2),
         ...(bridged ? [linkButton(`${SITE_ORIGIN}/profile`, 'تذاكري على الموقع')] : []))] }, i.id);
       const existing = s.a.panels.ticket;
@@ -370,10 +428,28 @@ export function ticketActions(c) {
     complaintForm(i) {
       c.assertGuild(i);
       const id = idOf(i.message?.id);
-      return new ModalBuilder().setTitle('شكوى خاصة · BLACK X').setCustomId(`bx:x:complaint:${id}`)
-        .addLabelComponents(new LabelBuilder().setLabel('تفاصيل الشكوى')
-          .setDescription('النص بيتحفظ في التذكرة الخاصة ويوصل للمالك في الخاص. ما تكتبش أسرار أو كلمات سر.')
-          .setTextInputComponent(new TextInputBuilder().setCustomId('details').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(true)));
+      return ticketForm(`bx:x:complaint:${id}`, 'شكوى خاصة · BLACK X', 'details', 'تفاصيل الشكوى',
+        'النص بيتحفظ في التذكرة الخاصة ويوصل للمالك في الخاص. ما تكتبش أسرار أو كلمات سر.', 1000);
+    },
+    staffForm(i, action, id) {
+      c.assertGuild(i);
+      // Initial acknowledgement is a blank modal. All case access is checked live when it is submitted.
+      const customId = caseButtonId(action, idOf(id));
+      if (action === 'reply') return ticketForm(customId, 'رد خاص على التذكرة', 'body', 'الرد', 'هيتبعت في روم التذكرة فقط؛ مش هيُشارك على الموقع.', 1000);
+      return ticketForm(customId, 'تأكيد إغلاق التذكرة', 'reason', 'سبب القفل', 'التذكرة هتتقفل للكتابة لصاحبها من غير حذف الروم.', 250, TextInputStyle.Short);
+    },
+    async staffDetail(i, { id }) {
+      const s = await discordStaff(i)();
+      const r = scopedRecord(s, id, true);
+      const room = reader(c, s, r);
+      await c.assertCurrent(s);
+      const description = room ? [...detailLines(r).slice(1), ...(r.assignee ? [`مسؤول التذكرة: ${memberRef(r.assignee)}`] : [])].join('\n')
+        : 'روم التذكرة مش متاح حاليًا. مفيش إجراء سريع للروم ده.';
+      const controls = room && r.channelId && !r.closedAt && !room.archived ? [row(
+        button(caseButtonId('claim', id), 'استلم', 1, Boolean(r.assignee)), button(caseButtonId('reply', id), 'ردّ في الروم'),
+        button(caseButtonId('close', id), 'اقفل التذكرة', 4),
+      )] : [];
+      return { embeds: [{ ...caseEmbed(r), description }], components: controls };
     },
     async complain(i, panelId, details) {
       const by = c.assertGuild(i);

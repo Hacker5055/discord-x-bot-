@@ -11,15 +11,26 @@ const TTL = 5 * 60_000;
 const openTickets = (a) => Object.values(a.requests).some((r) => r.kind === 'ticket' && !r.closedAt);
 const server = (a) => a.server ??= { profiles: {} };
 const ensureVersion = (a, version) => { if (a.version !== version) throw stale(); };
-const noSupportSetup = () => new AppError('SERVER_PREPARE_SUPPORT', 'اختار روم اللوحة، كاتيجوري التذاكر، روم فريق خاص، ورول الفريق في /server prepare.');
+const noSupportSetup = (missing) => new AppError('SERVER_PREPARE_SUPPORT', `كمّل الاختيارات الناقصة في /server prepare: ${missing.join('، ')}.`);
 const intentForbidden = (error) => error instanceof DiscordApiError && error.status === 403;
 const labels = { rules: 'القوانين · قراءة فقط', read_only: 'قراءة فقط', open: 'مفتوح للأعضاء', restricted: 'رول محدد', staff: 'فريق محدد',
-  owner_only: 'المالك', ticket_panel: 'لوحة دعم · قراءة وزر شكوى', ticket_category: 'كاتيجوري تذاكر خاصة', support_staff: 'صندوق وأوامر دعم خاصة' };
+  staff_log: 'سجل فريق · قراءة فقط', owner_only: 'المالك', ticket_panel: 'لوحة دعم · قراءة وزر شكوى', ticket_category: 'كاتيجوري تذاكر خاصة', support_staff: 'صندوق وأوامر دعم خاصة' };
 const specialSpecs = (support) => !support ? {} : {
   [support.panelId]: { profile: 'ticket_panel' }, [support.categoryId]: { profile: 'ticket_category', roleId: support.roleId },
   [support.staffId]: { profile: 'support_staff', roleId: support.roleId },
 };
 const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('base64url');
+
+function supportRoom(c, w, refs, key, id) {
+  const category = key === 'category';
+  try { return c.findRoom(w, id, category ? [C.GuildCategory] : TEXT_ROOMS); }
+  catch (error) {
+    if (!(error instanceof AppError) || error.code !== 'ADMIN_ROOM') throw error;
+    const source = refs[key] ? 'الاختيار الحالي' : 'الربط المحفوظ';
+    const kind = category ? 'كاتيجوري التذاكر نفسها، مش روم جوّاها' : key === 'staff' ? 'روم نصّي خاص بالفريق' : 'روم نصّي للوحة الأعضاء';
+    throw new AppError('ADMIN_ROOM', `${key}: ${source} (${id}) مش ظاهر للبوت أو نوعه مش مناسب. اختار ${kind} وراجع View Channel.`);
+  }
+}
 
 function supportPlan(c, { by, w, a }, refs) {
   const prior = a.teams.support;
@@ -28,13 +39,14 @@ function supportPlan(c, { by, w, a }, refs) {
   const privateCandidates = prior?.rooms.filter((id) => id !== panelId && w.channels.some((ch) => ch.id === id && TEXT_ROOMS.includes(ch.type))) ?? [];
   const staffId = refs.staff ?? a.rooms.site_staff ?? (privateCandidates.length === 1 ? privateCandidates[0] : undefined);
   const roleId = refs.role ?? prior?.roleId;
-  if (![panelId, categoryId, staffId, roleId].every(Boolean)) {
-    if (Object.keys(refs).length) throw noSupportSetup();
+  const missing = Object.entries({ panel: panelId, category: categoryId, staff: staffId, role: roleId }).filter(([, id]) => !id).map(([key]) => key);
+  if (missing.length) {
+    if (Object.keys(refs).length) throw noSupportSetup(missing);
     return undefined;
   }
-  const panel = c.findRoom(w, panelId, TEXT_ROOMS);
-  const category = c.findRoom(w, categoryId, [C.GuildCategory]);
-  const staffRoom = c.findRoom(w, staffId, TEXT_ROOMS);
+  const panel = supportRoom(c, w, refs, 'panel', panelId);
+  const category = supportRoom(c, w, refs, 'category', categoryId);
+  const staffRoom = supportRoom(c, w, refs, 'staff', staffId);
   if (panelId === staffId || panel.parent_id === categoryId || staffRoom.parent_id === categoryId) {
     throw roomError(category, 'لوحة الأعضاء وروم الفريق لازم يكونوا منفصلين وخارج كاتيجوري التذاكر.');
   }
@@ -45,13 +57,17 @@ function supportPlan(c, { by, w, a }, refs) {
       ch.type !== C.GuildText || !/^bx-ticket:[0-9]{17,20}$/.test(ch.topic ?? '')))) {
     throw roomError(category, 'اختار كاتيجوري فاضية أو الكاتيجوري المخصصة للتذاكر بالفعل؛ ما ينفعش تحتوي رومات ثابتة.');
   }
-  setupRole(c, w, a, roleId);
+  try { setupRole(c, w, a, roleId); }
+  catch (error) {
+    if (!(error instanceof AppError) || error.code !== 'SERVER_PREPARE_ROLE') throw error;
+    throw new AppError(error.code, `role: ${refs.role ? 'الاختيار الحالي' : 'الربط المحفوظ'} (${roleId}). ${error.message}`, error.status);
+  }
   return { ownerId: by, panelId, categoryId, staffId, roleId };
 }
 
 async function assertStaffRolesNotSelectable(c, w, specs) {
   if (!w.guild.features?.includes('COMMUNITY')) return;
-  const roles = new Set(Object.values(specs).filter(({ profile }) => ['staff', 'support_staff'].includes(profile)).map(({ roleId }) => roleId));
+  const roles = new Set(Object.values(specs).filter(({ profile }) => ['staff', 'staff_log', 'support_staff'].includes(profile)).map(({ roleId }) => roleId));
   if (!roles.size) return;
   const onboarding = await c.api.getOnboarding(c.guildId);
   if (onboarding?.guild_id !== c.guildId || !Array.isArray(onboarding.prompts) || !onboarding.prompts.every((p) =>

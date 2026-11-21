@@ -18,6 +18,7 @@ const BRIDGE_SECRET = 'mock_site_only_secret_not_for_production';
 const TEST_BOT_ORIGIN = 'https://bot.example.invalid';
 const reason = 'المشكلة اتحلت';
 const staffScope = (f) => f.make({ by: MOD_ID, channel: f.staffRoom });
+const ticketReplies = (f) => f.api.messages.filter(({ data }) => data.embeds?.[0]?.title !== '🎫 تذكرة BLACK X');
 
 async function startServer(t, f, { admin = f.admin, ...options } = {}) {
   const getHealth = () => ({ ok: true, uptime: 120, bot: { id: BOT_ID, ready: true }, guild: { id: GUILD_ID, memberCount: 23 } });
@@ -254,7 +255,7 @@ test('tampered rooms never receive shared content, and already-stored content is
     return getChannel(id);
   };
   await check(call('tickets/reply', { ...reply, body: 'not sent', requestId: randomUUID() }), 409, 'ADMIN_TICKET_PRIVACY');
-  assert.equal(f.api.messages.length, 1);
+  assert.equal(ticketReplies(f).length, 1);
   const result = await check(call('tickets/detail', { discordId: MEMBER_ID, id }), 200);
   assert.equal(result.ticket.roomState, 'blocked');
   assert.equal(result.ticket.discordUrl, null);
@@ -284,13 +285,13 @@ test('lost Discord replies remain unconfirmed across bot restarts without duplic
   f.clock.at += 20 * 60_000;
   const restarted = await startServer(t, f, { admin: f.restart() });
   assert.deepEqual((await check(restarted.call('staff/tickets/reply', payload), 200)).message, first.message);
-  assert.equal(f.api.messages.length, 1);
+  assert.equal(ticketReplies(f).length, 1);
   f.api.createMessage = async () => { throw new DiscordApiError(429); };
   const another = { ...payload, requestId: randomUUID(), body: 'رد مختلف' };
   await check(restarted.call('staff/tickets/reply', another), 429, 'RATE_LIMITED');
   f.api.createMessage = send;
   assert.equal((await check(restarted.call('staff/tickets/reply', another), 200)).message.delivery, 'sent');
-  assert.equal(f.api.messages.length, 2);
+  assert.equal(ticketReplies(f).length, 2);
 });
 
 test('bridge quotas are per actor and do not consume the old API budget', async (t) => {
@@ -325,7 +326,7 @@ test('a lost channel-create reply reuses the verified room and a lost archive wr
   await check(call('staff/tickets/close', close), 502, 'DISCORD_REJECTED');
   const reply = { discordId: MEMBER_ID, id: opening.id, requestId: randomUUID(), body: 'already read-only' };
   await check(call('tickets/reply', reply), 409, 'ADMIN_STALE');
-  assert.equal(f.api.messages.length, 0);
+  assert.equal(ticketReplies(f).length, 0);
   await check(call('staff/tickets/close', close), 200);
   assert.equal(f.api.writes.filter(({ operation }) => operation === 'putOverwrite').length, 1);
 });
@@ -344,10 +345,10 @@ test('shared reply cleanly rejects secrets and an in-flight website disable; Dis
     return get(...args);
   };
   await check(call('tickets/reply', { ...payload, body: 'not shared' }), 409, 'ADMIN_STALE');
-  assert.equal(f.api.messages.length, 0);
+  assert.equal(ticketReplies(f).length, 0);
   assert.deepEqual(adminOf(await f.store.read()).requests[i.id].shared, []);
   f.api.getChannel = get;
   await f.admin.ticket.reply(staffScope(f), { id: i.id, body: 'Discord only' });
-  assert.equal(f.api.messages.length, 1);
+  assert.equal(ticketReplies(f).length, 1);
   assert.doesNotMatch(f.logs.join('\n'), new RegExp(BRIDGE_SECRET));
 });

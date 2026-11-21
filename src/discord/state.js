@@ -80,12 +80,10 @@ export function targetRoleOrder({ allRoles, botRole }, resolved, guildId) {
 
 export function planWebhooks(hooks, channelId, configuredId) {
   const incoming = hooks.filter((hook) => hook.type === 1 && hook.channel_id === channelId);
-  const keep = incoming.find(({ id }) => id === configuredId);
+  const pinned = incoming.find(({ id }) => id === configuredId);
   const named = incoming.filter(({ name }) => name === WEBHOOK_NAME);
-  return {
-    keep, named, remove: named.filter(({ id }) => id !== keep?.id),
-    stale: Boolean(configuredId && !keep),
-  };
+  const selected = pinned ?? (named.length === 1 ? named[0] : undefined);
+  return { selected, ambiguous: !selected && named.length > 1, stale: Boolean(configuredId && !pinned) };
 }
 
 export const MANAGED_ROLE_PERMISSIONS = String(PERMISSION.ViewChannel);
