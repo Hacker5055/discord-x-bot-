@@ -2,7 +2,7 @@ import { announcementRoom } from '../commands/announce.js';
 import { DAY, parsePartyDate } from '../community/time.js';
 import { timestamp } from '../community/ui.js';
 import { AppError, DiscordApiError, errorFields } from '../lib/errors.js';
-import { adminOf, audit, card, denied, fixedChoice, future, idOf, limits, live, notFound, post, requestAt,
+import { adminOf, audit, card, denied, fixedChoice, future, idOf, limits, live, isMissing, notFound, post, requestAt,
   roomRef, safeTitle, stale, TEXT_ROOMS } from './core.js';
 
 const incidentStages = { investigating: 'بنحقق', monitoring: 'بنراقب بعد الإصلاح', resolved: 'اتحلّت' };
@@ -199,4 +199,4 @@ export async function deliverAnnouncements(c, snapshot) {
       await finish(started && !explicitReject ? 'review' : 'failed');
     }
   });
-}
+                }
