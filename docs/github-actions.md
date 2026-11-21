@@ -27,7 +27,7 @@ heroku stack:set container --app "$APP_NAME"
 | `BX_OWNER_DISCORD_ID` | معرّف مالك السيرفر الفعلي. |
 | `BOT_API_SECRET` | سر منفصل مشترك مع خادم الموقع. |
 
-لا تضبط `PORT`: Heroku يعيّنه تلقائيًا، والبوت يستمع عليه. صورة Docker تستخدم Node.js 20 ولا تحتاج إلى Node.js buildpack. لا ترفع `.env` أو توكن Discord أو سر الموقع إلى GitHub. معرّفات `DISCORD_*` الاختيارية من `/setup scope:integrations` يمكن إضافتها لاحقًا في نفس **Config Vars**.
+لا تضبط `PORT`: Heroku يعيّنه تلقائيًا، والبوت يستمع عليه. صورة Docker تستخدم Node.js 24 ولا تحتاج إلى Node.js buildpack. لا ترفع `.env` أو توكن Discord أو سر الموقع إلى GitHub. معرّفات `DISCORD_*` الاختيارية من `/setup scope:integrations` يمكن إضافتها لاحقًا في نفس **Config Vars**.
 
 ## ٢. إعداد اعتماد النشر في GitHub
 
