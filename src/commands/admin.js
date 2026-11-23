@@ -11,7 +11,7 @@ const choice = (name, description, values) => option('String', name, description
 const integer = (name, description, min, max) => option('Integer', name, description, (o) => o.setMinValue(min).setMaxValue(max));
 const bool = (name, description, required = false) => option('Boolean', name, description, undefined, required);
 const channel = (name = 'channel', description = 'الروم المقصود', types = TEXT_ROOMS, required = true) => option('Channel', name, description, (o) => o.addChannelTypes(...types), required);
-const user = (description = 'العضو المقصود') => option('User', 'user', description);
+const user = (description = 'العضو المقصود', required = true) => option('User', 'user', description, undefined, required);
 const role = (required = true) => option('Role', 'role', 'اختار رول موجود', undefined, required);
 const team = () => choice('team', 'الفريق المصرّح له', TEAMS);
 const id = () => text('id', 'رقم السجل اللي رجّعه البوت', 20);
@@ -33,9 +33,10 @@ const optBuilder = (builder, options) => {
   return builder;
 };
 
-function command(name, description, service, routes, { single = false, owner = false, autocomplete = false } = {}) {
+function command(name, description, service, routes, { single = false, owner = false, permissions, autocomplete = false } = {}) {
   const data = new SlashCommandBuilder().setName(name).setDescription(description);
-  if (owner) data.setDefaultMemberPermissions(P.ManageGuild);
+  if (permissions !== undefined) data.setDefaultMemberPermissions(permissions);
+  else if (owner) data.setDefaultMemberPermissions(P.ManageGuild);
   if (single) optBuilder(data, routes[0].options);
   else for (const route of routes) data.addSubcommand((s) => optBuilder(s.setName(route.name).setDescription(route.description), route.options));
   const byName = new Map(routes.map((route) => [route.name, route]));
@@ -68,7 +69,11 @@ export const adminCommands = [
     r('pause', 'أوقف ميزة واحدة أو رجّعها من غير ريستارت', choice('module', 'اسم الميزة', MODULES), bool('paused', 'توقف مؤقت', true)),
     r('bridge', 'تفعيل أو إيقاف ربط الموقع من غير تغيير التذاكر', bool('enabled', 'حالة ربط الموقع', true)),
     method(r('settings', 'اعرض التفعيل والتفويض والرومات المربوطة'), 'panel'),
+    r('health', 'فحص خاص لروابط الدعم وصلاحيات البوت والإشراف من غير تعديل'),
+    r('moderation', 'فعّل أو أوقف أوامر طرد وكتم الأعضاء بلا تغيير للرولات', bool('enabled', 'تفعيل أوامر الطرد والكتم', true)),
+    r('moderation_review', 'سجّل مراجعة إجراء غير مؤكد من غير إعادة التنفيذ', id(), bool('confirm', 'راجعت حالة العضو وسجل Discord', true)),
   ], { owner: true }),
+  command('help', 'دليل BLACK X الخاص: القوانين والدعم وأوامر الأعضاء', 'overview', [r('help', 'دليل الأعضاء')], { single: true }),
   command('ticket', 'تذاكر BLACK X الخاصة', 'ticket', [
     r('panel', 'انشر لوحة فتح التذاكر في روم الدعم المضبوط',
       text('message_id', 'للمالك: معرّف لوحة قديمة موجودة في نفس الروم', 20, false),
@@ -88,10 +93,20 @@ export const adminCommands = [
     r('done', 'علّم مهمة كمكتملة', team(), id()), r('handoff', 'ملخص تسليم الوردية', team()),
     r('stats', 'تقرير الدعم لآخر ٧ أيام'), r('practice', 'محاكاة تدريبية بدون أثر على السيرفر', team(), choice('scenario', 'حالة وهمية للتدريب', ['ticket', 'warning', 'slow'])),
   ]),
-  command('mod', 'توثيق التنبيهات والاستئناف بدون عقوبات تلقائية', 'mod', [
+  command('mod', 'التنبيهات والاستئناف وسجل إجراءات الإشراف', 'mod', [
     r('warn', 'سجّل تنبيهًا إداريًا من غير DM', user(), reason()), r('history', 'اعرض سجل تنبيهات العضو', user()),
+    r('cases', 'اعرض آخر إجراءات الطرد والكتم في رد خاص للمشرفين', user('اختياري: اعرض إجراءات عضو واحد', false)),
     r('appeal', 'قدّم استئنافًا لتنبيه يخصك', id(), reason()), r('review', 'راجع استئنافًا أنشأ تنبيهه مشرف آخر', id(), outcome(), reason()),
   ]),
+  command('kick', 'عاين طرد عضو واحد ووافق بزر خاص قبل التنفيذ', 'memberModeration', [
+    r('kick', 'معاينة الطرد', user(), reason()),
+  ], { single: true, permissions: P.KickMembers }),
+  command('timeout', 'كتم مؤقت لعضو واحد من دقيقة لحد ٢٨ يوم', 'memberModeration', [
+    r('timeout', 'كتم مؤقت', user(), text('duration', 'المدة، مثل 10m أو 2h أو 1d', 8), reason()),
+  ], { single: true, permissions: P.ModerateMembers }),
+  command('untimeout', 'فك الكتم المؤقت عن عضو واحد', 'memberModeration', [
+    r('untimeout', 'فك الكتم', user(), reason()),
+  ], { single: true, permissions: P.ModerateMembers }),
   command('kb', 'الردود المعتمدة لفريق الدعم', 'kb', [
     r('set', 'احفظ ردًا جاهزًا للمراجعة قبل النشر', text('key', 'مفتاح الرد بحروف إنجليزية', 24), title(), text('body', 'الرد', 900)),
     r('draft', 'اعرض مسودة رد قبل اعتمادها', text('key', 'مفتاح الرد', 24)),
@@ -153,7 +168,7 @@ export const adminCommands = [
       when('starts_at'), integer('minutes', 'المدة المتوقعة بالدقايق', 5, 360), bool('force', 'أكّد التعارض المقصود')),
     r('cancel', 'ألغِ ميعادًا من الروم اللي اتضاف فيه', id()),
   ]),
-  command('my', 'اعرض طلباتك وتنبيهاتك وحجوزاتك للعرض الخاص', 'my', [r('view', 'طلباتي')], { single: true }),
+  command('my', 'اعرض طلباتك وحجوزاتك وإجراءات الإشراف الخاصة بيك', 'my', [r('view', 'طلباتي')], { single: true }),
   command('schedule', 'قائمة الإعلانات المؤجلة وإلغاؤها', 'publication', [
     r('list', 'اعرض الإعلانات المجدولة وحالتها'), r('cancel', 'ألغِ إعلانًا لم يُرسل بعد', id()),
   ]),

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DiscordApi } from '../src/discord/api.js';
 import { DiscordApiError } from '../src/lib/errors.js';
-import { FAKE_BOT_TOKEN, FAKE_WEBHOOK_TOKEN, GUILD_ID } from './fixtures/discord.js';
+import { FAKE_BOT_TOKEN, FAKE_WEBHOOK_TOKEN, GUILD_ID, MEMBER_ID } from './fixtures/discord.js';
 
 const jsonResponse = (status, json, headers) => new Response(JSON.stringify(json), { status, headers });
 function stub(...responses) {
@@ -120,4 +120,26 @@ test('guarded setup role and channel creates do not replay a POST after an ambig
     assert.equal(calls[0].options.headers['x-audit-log-reason'], 'BLACK%20X%20approved%20support%20setup');
     assert.deepEqual(waits, []);
   }
+});
+
+test('member actions use guild-member REST routes, a correlation audit reason, and no retries', async () => {
+  const until = '2027-01-01T10:10:00.000Z';
+  const reason = 'BLACK X case 100000000000000099';
+  const { api, calls, waits } = stub(new Response(null, { status: 204 }), jsonResponse(200, { communication_disabled_until: until }),
+    jsonResponse(200, { communication_disabled_until: null }), jsonResponse(429, { retry_after: 20 }), new Error('lost response'));
+  await api.kickMember(GUILD_ID, MEMBER_ID, reason);
+  await api.setMemberTimeout(GUILD_ID, MEMBER_ID, until, reason);
+  await api.setMemberTimeout(GUILD_ID, MEMBER_ID, null, reason);
+  await assert.rejects(api.setMemberTimeout(GUILD_ID, MEMBER_ID, until, reason), { status: 429 });
+  await assert.rejects(api.kickMember(GUILD_ID, MEMBER_ID, reason), { status: 502 });
+  assert.equal(calls.length, 5);
+  assert.deepEqual(waits, []);
+  for (const { url, options } of calls) {
+    assert.equal(url, `https://discord.com/api/v10/guilds/${GUILD_ID}/members/${MEMBER_ID}`);
+    assert.equal(options.headers['x-audit-log-reason'], encodeURIComponent(reason));
+  }
+  assert.deepEqual(calls.map(({ options }) => options.method), ['DELETE', 'PATCH', 'PATCH', 'PATCH', 'DELETE']);
+  assert.equal(calls[0].options.body, undefined);
+  assert.deepEqual(JSON.parse(calls[1].options.body), { communication_disabled_until: until });
+  assert.deepEqual(JSON.parse(calls[2].options.body), { communication_disabled_until: null });
 });

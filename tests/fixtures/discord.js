@@ -71,6 +71,21 @@ export class MemoryDiscord {
     return this.copy(this.members.get(userId));
   }
 
+  async kickMember(guildId, userId, reason) {
+    this.check(guildId);
+    this.add('kickMember', 'DELETE', { userId, reason });
+    if (!this.members.delete(userId)) throw new DiscordApiError(404, 10007);
+  }
+
+  async setMemberTimeout(guildId, userId, until, reason) {
+    this.check(guildId);
+    this.add('setMemberTimeout', 'PATCH', { userId, until, reason });
+    const member = this.members.get(userId);
+    if (!member) throw new DiscordApiError(404, 10007);
+    member.communication_disabled_until = until;
+    return this.copy(member);
+  }
+
   async listGuildMembers(guildId, { limit = 1000, after } = {}) {
     this.check(guildId);
     this.add('listGuildMembers', 'GET', { limit, after });
