@@ -49,11 +49,21 @@ test('bootstrap fetches the bot and registers all commands on the configured gui
   assert.equal(registration.applicationId, BOT_ID);
   assert.deepEqual(registration.commands.map(({ name }) => name), [
     'setup', 'announce', 'role', 'status', 'arena', 'party', 'follow', 'recommend', 'adhkar', 'prayer', 'daily', 'ramadan', 'seerah',
-    'admin', 'ticket', 'staff', 'mod', 'kb', 'incident', 'access', 'layout', 'room', 'guide', 'welcome', 'idea', 'content', 'discussion',
-    'calendar', 'my', 'schedule', 'automod', 'server', 'rules',
+    'admin', 'help', 'ticket', 'staff', 'mod', 'kick', 'timeout', 'untimeout', 'kb', 'incident', 'access', 'layout', 'room', 'guide', 'welcome',
+    'idea', 'content', 'discussion', 'calendar', 'my', 'schedule', 'automod', 'server', 'rules',
   ]);
   assert.deepEqual(registration.commands[0].options.map(({ name }) => name), ['dry_run', 'scope']);
   assert.deepEqual(registration.commands[2].options.map(({ name }) => name), ['grant', 'revoke']);
+  for (const [name, flag, options] of [
+    ['kick', PermissionFlagsBits.KickMembers, ['user', 'reason']],
+    ['timeout', PermissionFlagsBits.ModerateMembers, ['user', 'duration', 'reason']],
+    ['untimeout', PermissionFlagsBits.ModerateMembers, ['user', 'reason']],
+  ]) {
+    const action = registration.commands.find((cmd) => cmd.name === name);
+    assert.equal(action.default_member_permissions, String(flag));
+    assert.deepEqual(action.options.map((opt) => opt.name), options);
+    assert.ok(action.options.every(({ required }) => required));
+  }
 });
 
 test('bot uses Guilds intent only and refuses other guilds', async () => {

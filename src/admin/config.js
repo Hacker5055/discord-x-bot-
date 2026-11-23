@@ -11,7 +11,10 @@ export function configActions(c) {
   }));
   return {
     async enable(i, { enabled }) {
-      await changed(i, enabled ? 'admin_enabled' : 'admin_disabled', 'admin', (a) => { a.enabled = enabled; });
+      await changed(i, enabled ? 'admin_enabled' : 'admin_disabled', 'admin', (a) => {
+        a.enabled = enabled;
+        if (!enabled && a.moderation) delete a.moderation.enabledBy;
+      });
       return [enabled ? 'اتفعّلت أدوات الإدارة. الميزات اللي بتحتاج روم أو فريق لازم تتضبط الأول.' :
         'أدوات الإدارة اتوقفت. انتهاء الوصول المؤقت والتهدئة يفضل شغّال للحماية.'];
     },

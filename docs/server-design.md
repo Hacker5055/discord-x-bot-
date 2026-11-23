@@ -38,7 +38,8 @@
 | `/server prepare` و`/server undo` | `View Channel` + `Manage Channels` + `Manage Roles` (**Manage Permissions**) في الكاتيجوري والرومات المستهدفة، والحق في تعديل البتّات المعروضة في الخطة. المعاينة تسمي الإذن الناقص. ما تضفش صلاحيات أقوى عشان تتخطى الخطة. |
 | إدارة VIP وCreator الموجودة | `Manage Roles` والهرمية المطلوبة؛ البوت أعلى من رولات المنتج اللي بيعدّلها. |
 | الويب هوكات القديمة | `Manage Webhooks` فقط في الرومات اللي بتحتاج إنشائها أو فحصها. مش جزء من التذاكر والتحضير. `/setup scope:integrations` ما بيحذفش ويب هوك موجود ولا يرجّع أذونات روم اتجهّز. |
-| إضافات اختيارية | صوت مؤقت: `Connect` و`Move Members` وإدارة روماته، مع `BX_ADMIN_VOICE=1`. تهدئة مؤقتة: `View Audit Log` عشان الاسترجاع والتحقق. لـAutoMod الأصلي استخدم إعداد Discord؛ رصد البوت الاختياري يحتاج `Manage Server`. مفيش حاجة أساسية لـ`Ban Members` أو `Kick Members` أو `Manage Messages` من البوت. |
+| إشراف الأعضاء الاختياري | `Kick Members` للطرد فقط، و`Timeout Members` (`ModerateMembers`) للكتم وفكّه. الأذونات على مستوى السيرفر للبوت والمشرف، مع تفعيل المالك وتفويض `moderation` وهرمية الرولات. راجع `/admin health`. مش أذونات مطلوبة للدعم؛ لا تمنحها لرول فريق الدعم. |
+| إضافات اختيارية | صوت مؤقت: `Connect` و`Move Members` وإدارة روماته، مع `BX_ADMIN_VOICE=1`. تهدئة مؤقتة: `View Audit Log` عشان الاسترجاع والتحقق. لـAutoMod الأصلي استخدم إعداد Discord؛ رصد البوت الاختياري يحتاج `Manage Server`. مفيش حاجة أساسية لـ`Ban Members` أو `Manage Messages` من البوت. |
 
 أساسي: `Guilds`، وOAuth `bot applications.commands`. فعّل **Server Members Intent** في Developer Portal لو عايز حصر أعضاء الدعم لإرسال التنبيهات لكل المؤهلين، أو لو هتشغّل استقبال الترحيب بـ`BX_WELCOME=1`. البوت مش محتاج **Message Content Intent**. من غير حصر الفريق، تنبيه المالك وصندوق الفريق يفضلوا متاحين لو الأذونات صحيحة.
 

@@ -5,6 +5,7 @@ import { AppError } from '../lib/errors.js';
 import { adminOf, audit, denied, fixedChoice, idOf, limits, live, memberRef, notFound, requestAt,
   roomRef, safeTitle, stale, TEXT_ROOMS } from './core.js';
 
+import { ownModerationLines } from './moderation.js';
 import { duplicate, kindAt, requestLine, setRecord, stages } from './records.js';
 
 export function moderationActions(c) {
@@ -184,11 +185,13 @@ export function ownRequests(c) {
     live(a);
     const entries = Object.values(a.requests).filter((r) => r.by === by).sort((a, b) => b.at - a.at).slice(0, 15);
     const warnings = Object.values(a.warnings).filter((r) => r.subject === by).sort((a, b) => b.at - a.at).slice(0, 8);
+    const moderation = ownModerationLines(a, by);
     const bookings = Object.values(state.parties).filter((r) => !r.cancelled && r.at > c.now())
       .filter((r) => r.rsvps[by] || r.waitlist?.includes(by)).slice(0, 10);
     return ['🧾 طلباتي', ...entries.map((r) => `${requestLine({ ...r, assignee: undefined })}${r.kind === 'ticket' && r.channelId ? ` · ${roomRef(r.channelId)}` : ''}${r.reason ? ` · ${safeTitle(r.reason)}` : ''}`),
       ...warnings.map((w) => `• تنبيه \`${w.id}\` · ${w.status === 'active' ? 'نشط' : 'اتشال'} · ${safeTitle(w.note)}`),
       ...bookings.map((p) => `• حفلة \`${p.id}\` · ${timestamp(p.at)} · ${p.rsvps[by] ? 'حجز مؤكد' : `الانتظار: ${p.waitlist.indexOf(by) + 1}${p.waitlist[0] === by && Object.keys(p.rsvps).length < p.capacity ? ' · المقعد متاح لك، أكّده من الكارت' : ''}`}`),
-      ...(!entries.length && !warnings.length && !bookings.length ? ['لسه مفيش طلبات أو حجوزات ليك.'] : [])];
+      ...moderation,
+      ...(!entries.length && !warnings.length && !bookings.length && !moderation.length ? ['لسه مفيش طلبات أو حجوزات ليك.'] : [])];
   };
 }

@@ -120,6 +120,12 @@ export class DiscordApi {
   moveMember(guildId, userId, channelId) {
     return this.#request('PATCH', `/guilds/${guildId}/members/${userId}`, { channel_id: channelId }, undefined, { guarded: true });
   }
+  kickMember(guildId, userId, reason) {
+    return this.#request('DELETE', `/guilds/${guildId}/members/${userId}`, undefined, undefined, { guarded: true, reason });
+  }
+  setMemberTimeout(guildId, userId, until, reason) {
+    return this.#request('PATCH', `/guilds/${guildId}/members/${userId}`, { communication_disabled_until: until }, undefined, { guarded: true, reason });
+  }
   getChannelAudits(guildId, after) {
     return this.#request('GET', `/guilds/${guildId}/audit-logs?action_type=11&limit=100&after=${after}`);
   }

@@ -36,8 +36,9 @@ export async function adminFixture({ voice = false, automod = false, setup = fal
   everyone.permissions = String(P.ViewChannel | P.SendMessages | P.ReadMessageHistory | P.Connect | P.UseApplicationCommands);
   const botRole = api.roles.find((r) => r.id === BOT_ROLE_ID);
   botRole.permissions = String(BigInt(botRole.permissions) | P.EmbedLinks | P.ReadMessageHistory | P.ViewAuditLog | P.MoveMembers | P.Connect | P.ManageGuild);
-  for (const [id, member] of api.members) Object.assign(member, { user: { id, bot: id === BOT_ID } });
-  for (const id of [REVIEWER, STRANGER, DIM]) api.members.set(id, { roles: [], user: { id, bot: false } });
+  const joined_at = new Date(clock.at - 60_000).toISOString();
+  for (const [id, member] of api.members) Object.assign(member, { user: { id, bot: id === BOT_ID }, joined_at });
+  for (const id of [REVIEWER, STRANGER, DIM]) api.members.set(id, { roles: [], user: { id, bot: false }, joined_at });
   if (setup) await provisionGuild(context);
   const chan = (type, name, options = {}) => api.createChannel(GUILD_ID, { type, name, ...options });
   const publicRoom = await chan(C.GuildText, 'bot-actions');

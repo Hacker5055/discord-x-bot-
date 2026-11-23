@@ -4,6 +4,8 @@ import { configActions } from './config.js';
 import { adminOf, createAdminCore, stale } from './core.js';
 import { catalogStatus } from './catalog-status.js';
 import { automodMonitor, voiceRooms } from './gateway.js';
+import { memberModerationActions } from './moderation.js';
+import { overviewActions } from './overview.js';
 import { discussionActions, guideActions } from './portal.js';
 import { deliverAnnouncements, incidentActions, publicationActions } from './publication.js';
 import { contentActions, ideaActions, moderationActions, ownRequests } from './requests.js';
@@ -15,6 +17,7 @@ import { ticketActions } from './tickets.js';
 import { trainingActions } from './training.js';
 import { welcomeActions } from './welcome.js';
 
+const KICK_BUTTON = /^bx:x:kick:([0-9]{17,20})$/;
 const CASE_BUTTON = /^bx:x:case:(claim|reply|close):([0-9]{17,20})$/;
 const COMPLAINT_MODAL = /^bx:x:complaint:([0-9]{17,20})$/;
 const opensStaffForm = (customId) => /^(reply|close)$/.test(CASE_BUTTON.exec(customId)?.[1] ?? '');
@@ -33,6 +36,8 @@ export function createAdministration(dependencies) {
   const auto = automodMonitor(c);
   const report = catalogStatus(c);
   const training = trainingActions(c);
+  const memberModeration = memberModerationActions(c);
+  const overview = overviewActions(c);
   let running;
   async function maintain(guild) {
     if (!c.store) return;
@@ -48,8 +53,10 @@ export function createAdministration(dependencies) {
     }
   }
   return {
-    core: c, config: configActions(c), ticket: { ...ticket, alerts: ticket.complaints.status }, guide, rules, server, welcome: welcomeActions(c), staff: { ...staffActions(c, ticket), practice: training.practice }, kb: knowledgeActions(c),
-    mod: moderationActions(c), content: contentActions(c), idea: ideaActions(c), diagnostics: diagnosticActions(c),
+    core: c,
+    config: { ...configActions(c), health: overview.health, moderation: memberModeration.enable, moderation_review: memberModeration.review },
+    overview, memberModeration, ticket: { ...ticket, alerts: ticket.complaints.status }, guide, rules, server, welcome: welcomeActions(c), staff: { ...staffActions(c, ticket), practice: training.practice }, kb: knowledgeActions(c),
+    mod: { ...moderationActions(c), cases: memberModeration.cases }, content: contentActions(c), idea: ideaActions(c), diagnostics: diagnosticActions(c),
     room: roomActions(c), discussion: discussionActions(c), calendar: calendarActions(c), incident: incidentActions(c),
     publication: publicationActions(c), my: { view: ownRequests(c) }, auto, voice, report,
     form(i) {
@@ -70,6 +77,8 @@ export function createAdministration(dependencies) {
     async button(i) {
       const approve = /^bx:x:server:([0-9]{17,20})$/.exec(i.customId);
       if (approve) return server.confirm(i, approve[1]);
+      const kick = KICK_BUTTON.exec(i.customId);
+      if (kick) return memberModeration.confirmKick(i, kick[1]);
       const control = CASE_BUTTON.exec(i.customId);
       if (control?.[1] === 'claim') return ticket.claim(i, { id: control[2] });
       if (i.customId.startsWith('bx:x:train:')) return training.button(i);
